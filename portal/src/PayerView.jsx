@@ -6,12 +6,14 @@ export default function PayerView({ me }) {
   const [invoices, setInvoices] = useState([]);
   const [msg, setMsg] = useState(null);        // { ok, text }
   const [trail, setTrail] = useState(null);
+  const [busy, setBusy] = useState(false);
 
   const refresh = () => listInvoices().then(setInvoices).catch(() => {});
   useEffect(() => { refresh(); }, []);
 
   async function act(fn, id, label) {
     setMsg(null);
+    setBusy(true);
     try {
       const inv = await fn(id);
       setMsg({ ok: true, text: `${inv.invoiceNumber} → ${inv.status}` });
@@ -19,7 +21,7 @@ export default function PayerView({ me }) {
     } catch (e) {
       setMsg({ ok: false, text: e.response?.data?.error || e.message });
       refresh();
-    }
+    } finally { setBusy(false); }
   }
 
   const pending = invoices.filter(i => i.status === 'REGISTERED' && i.payerName === me.displayName);
@@ -48,9 +50,9 @@ export default function PayerView({ me }) {
                 <td className="amount">{inv.currency} {Number(inv.amount).toLocaleString('en-IN')}</td>
                 <td className="sub">{inv.dueDate}</td>
                 <td style={{ whiteSpace: 'nowrap' }}>
-                  <button className="btn primary" onClick={() => act(approveInvoice, inv.invoiceId)}>Approve</button>{' '}
-                  <button className="btn danger" onClick={() => act(id => disputeInvoice(id, 'Goods not received as described'), inv.invoiceId)}>Dispute</button>{' '}
-                  <button className="btn" onClick={async () => setTrail(await getHistory(inv.invoiceId))}>Audit trail</button>
+                  <button className="btn primary" disabled={busy} onClick={() => act(approveInvoice, inv.invoiceId)}>{busy ? 'Working…' : 'Approve'}</button>{' '}
+                  <button className="btn danger" disabled={busy} onClick={() => act(id => disputeInvoice(id, 'Goods not received as described'), inv.invoiceId)}>Dispute</button>{' '}
+                  <button className="btn" disabled={busy} onClick={async () => { try { setTrail(await getHistory(inv.invoiceId)); } catch {} }}>Audit trail</button>
                 </td>
               </tr>
             ))}
@@ -72,7 +74,8 @@ export default function PayerView({ me }) {
                 <td>{inv.supplierName}</td>
                 <td className="amount">{inv.currency} {Number(inv.amount).toLocaleString('en-IN')}</td>
                 <td><span className={`badge ${inv.status}`}>{inv.status}</span></td>
-                <td><button className="btn" onClick={async () => setTrail(await getHistory(inv.invoiceId))}>Audit trail</button></td>
+                <td><button className="btn" disabled={busy}
+                            onClick={async () => { try { setTrail(await getHistory(inv.invoiceId)); } catch {} }}>Audit trail</button></td>
               </tr>
             ))}
           </tbody>

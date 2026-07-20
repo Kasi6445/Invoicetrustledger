@@ -1,31 +1,75 @@
 import axios from 'axios';
-const API = 'http://localhost:3000';
-let token = null;
+
+// Empty string = same-origin (hosted build, where the API also serves the portal).
+// Local dev sets VITE_API_URL=http://localhost:3000 in portal/.env.development.
+const API = import.meta.env.VITE_API_URL || '';
+const TOKEN_KEY = 'itl_token';
+const USER_KEY = 'itl_user';
+
+let token = sessionStorage.getItem(TOKEN_KEY);
+let unauthorizedHandler = null;
+
+// App registers a handler so an expired/invalid session drops back to login.
+export function onUnauthorized(h) { unauthorizedHandler = h; }
+
+const client = axios.create({ baseURL: API });
+
+client.interceptors.request.use(cfg => {
+  if (token) cfg.headers.Authorization = `Bearer ${token}`;
+  return cfg;
+});
+
+client.interceptors.response.use(
+  r => r,
+  err => {
+    const is401 = err.response?.status === 401;
+    const isLoginCall = (err.config?.url || '').includes('/auth/login');
+    if (is401 && !isLoginCall) {
+      clearSession();
+      unauthorizedHandler?.('Your session has expired — please sign in again.');
+    }
+    return Promise.reject(err);
+  }
+);
+
+function clearSession() {
+  token = null;
+  sessionStorage.removeItem(TOKEN_KEY);
+  sessionStorage.removeItem(USER_KEY);
+}
+
+// Survive a page refresh: restore { role, displayName, vrn } if a token is stored.
+export function restoreSession() {
+  const raw = sessionStorage.getItem(USER_KEY);
+  if (!token || !raw) return null;
+  try { return JSON.parse(raw); } catch { clearSession(); return null; }
+}
 
 export async function login(username, password) {
-  const { data } = await axios.post(`${API}/auth/login`, { username, password });
+  const { data } = await client.post('/auth/login', { username, password });
   token = data.token;
+  sessionStorage.setItem(TOKEN_KEY, data.token);
+  sessionStorage.setItem(USER_KEY, JSON.stringify(
+    { role: data.role, displayName: data.displayName, vrn: data.vrn }));
   return data; // { token, role, displayName, vrn }
 }
-export function logout() { token = null; }
+export function logout() { clearSession(); }
 
-const h = () => ({ headers: { Authorization: `Bearer ${token}` } });
-
-export const listInvoices   = () => axios.get(`${API}/invoices`, h()).then(r => r.data);
-export const getInvoice     = id => axios.get(`${API}/invoices/${id}`, h()).then(r => r.data);
-export const getHistory     = id => axios.get(`${API}/invoices/${id}/history`, h()).then(r => r.data);
-export const approveInvoice = id => axios.post(`${API}/invoices/${id}/approve`, {}, h()).then(r => r.data);
-export const disputeInvoice = (id, reason) => axios.post(`${API}/invoices/${id}/dispute`, { reason }, h()).then(r => r.data);
-export const fundInvoice    = id => axios.post(`${API}/invoices/${id}/fund`, {}, h()).then(r => r.data);
-export const verifyLedger   = () => axios.get(`${API}/ledger/verify`, h()).then(r => r.data);
+export const listInvoices   = () => client.get('/invoices').then(r => r.data);
+export const getInvoice     = id => client.get(`/invoices/${id}`).then(r => r.data);
+export const getHistory     = id => client.get(`/invoices/${id}/history`).then(r => r.data);
+export const approveInvoice = id => client.post(`/invoices/${id}/approve`, {}).then(r => r.data);
+export const disputeInvoice = (id, reason) => client.post(`/invoices/${id}/dispute`, { reason }).then(r => r.data);
+export const fundInvoice    = id => client.post(`/invoices/${id}/fund`, {}).then(r => r.data);
+export const verifyLedger   = () => client.get('/ledger/verify').then(r => r.data);
 
 export function registerInvoice(fields, file) {
   const fd = new FormData();
   Object.entries(fields).forEach(([k, v]) => fd.append(k, v));
   if (file) fd.append('doc', file);
-  return axios.post(`${API}/invoices`, fd, h()).then(r => r.data);
+  return client.post('/invoices', fd).then(r => r.data);
 }
 export function aiExtract(file) {
   const fd = new FormData(); fd.append('doc', file);
-  return axios.post(`${API}/ai/extract`, fd, h()).then(r => r.data);
+  return client.post('/ai/extract', fd).then(r => r.data);
 }

@@ -18,17 +18,21 @@ api/         Express + JWT + role masking + Gemini OCR + risk scoring
   mockLedger.js    persistent hash-chained ledger in data/ledger.json (zero infra; also Plan B)
   fabricLedger.js  real Fabric via the Gateway SDK
   gculLedger.js    GCUL adapter stub — implement when Google grants testnet access
+  errors.js        ApiError + central error middleware — every error is { error, code }
+  validate.js      request-shape validation for writes (400 + field messages)
 portal/      React (Vite) — Supplier / Payer / Lender consoles + audit trail
-docs/        RULES.md (portable contract spec) · DEMO_SCRIPT.md · JUDGE_QA.md · test-invoices/
+docs/        RULES.md (portable contract spec) · ARCHITECTURE.md (layers + request flow)
+             DEMO_SCRIPT.md · JUDGE_QA.md · test-invoices/
 ```
 
 ## Common commands
 
 ```bash
 # API (from api/)
-cp .env.example .env && npm install
+cp .env.example .env && npm install   # then set a real JWT_SECRET in .env (see comment there)
 node server.js                 # start on :3000, leave running
 bash test-flow.sh               # conformance suite — must print "13 passed, 0 failed"
+bash regression.sh              # test-flow PLUS hardening checks (401/400/403, upload limits)
 node seed.js                    # demo data: one FINANCED invoice, one APPROVED-and-ready invoice
 rm -rf data                     # reset mock-mode ledger state (stop server first)
 
@@ -44,7 +48,22 @@ npm run build
 There is no separate unit test framework — `api/test-flow.sh` (curl against a running server) is
 the conformance test for the whole system, and it must pass identically against every ledger
 backend. There's no single-test-runner concept; it's one linear script of 13 checks against a
-live server instance. Run it after any change to `api/*.js` or `chaincode/lib/invoiceContract.js`.
+live server instance. `api/regression.sh` wraps it and adds API-hardening checks (wrong password
+→ 401, missing fields → 400 with field messages, garbage token → 401, wrong role → 403,
+oversized/wrong-type uploads rejected). Run regression.sh after any change to `api/*.js` or
+`chaincode/lib/invoiceContract.js`.
+
+## Deployment (Render, single service)
+
+`render.yaml` at the repo root deploys everything as ONE Node web service: buildCommand installs
+both package trees and runs `api/build-portal.js` (vite build → copy `portal/dist` into
+`api/public`, which `server.js` serves same-origin AFTER all API routes, with an index.html
+fallback for client paths). startCommand is `node api/server.js`. `AUTO_SEED=true` makes the
+server seed the two demo invoices in-process at boot whenever the ledger is empty — needed
+because the free tier wipes the disk on every restart; the seeding goes through the normal
+`ledger.submit()` calls, so no business rules are duplicated. In production the portal calls the
+API same-origin; local dev points it at :3000 via `portal/.env.development` (`VITE_API_URL`).
+`api/seed.js` also takes a target URL (`node seed.js https://host` or `API_URL=` env).
 
 ## Architecture: the swap seam
 
@@ -88,6 +107,12 @@ demo path ("Plan B") if the Fabric network can't be stood up.
 
 ## Other layers worth knowing about
 
+- API middleware stack (`api/server.js`): helmet, CORS locked to `http://localhost:5173`, morgan
+  request logging, rate-limited `/auth/login` (20/min), multer capped at 5 MB and pdf/png/jpg
+  only. Every error response has the shape `{ error, code }` via `api/errors.js` — ledger
+  rejections pass through verbatim in `error` with code `LEDGER_REJECTED` (tests grep those
+  messages, don't rewrite them). Request validation for registers lives in `api/validate.js` —
+  it's a shape check only; business rules stay in the ledger.
 - `api/masking.js` — field-level RBAC applied to every read response: payer never sees `risk` or
   `tamperWarning` or full bank details; lender sees risk/funding data but KYC/bank stay masked to
   last-4; supplier sees their own record unmasked. Route handlers always pipe reads through
@@ -101,6 +126,8 @@ demo path ("Plan B") if the Fabric network can't be stood up.
   `lloyds` and `otherbank` (two lenders on purpose — `otherbank` is the second-financing kill
   shot). Auth is plain JWT, explicitly not OIDC, for demo purposes.
 - Frontend (`portal/src/`) is one view per role (`SupplierView.jsx`, `PayerView.jsx`,
-  `LenderView.jsx`) plus `AuditTrail.jsx` and `Login.jsx`, composed in `App.jsx` by `me.role`.
-  `portal/src/api.js` is the only place that talks to the API (base URL hardcoded to
-  `http://localhost:3000`) and holds the JWT in a module-level variable (lost on page refresh).
+  `LenderView.jsx`) plus `AuditTrail.jsx`, `Login.jsx` and `ErrorBoundary.jsx`, composed in
+  `App.jsx` by `me.role`. `portal/src/api.js` is the only place that talks to the API (base URL
+  hardcoded to `http://localhost:3000`); it keeps the JWT in `sessionStorage` (survives refresh
+  via `restoreSession()`) and an axios interceptor clears the session and returns to login on any
+  401. Login: role cards only pre-fill the username — authentication happens on form submit.

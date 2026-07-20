@@ -1,20 +1,29 @@
-import { useState } from 'react';
-import { logout as apiLogout, verifyLedger } from './api';
+import { useEffect, useState } from 'react';
+import { logout as apiLogout, verifyLedger, restoreSession, onUnauthorized } from './api';
 import Login from './Login';
 import SupplierView from './SupplierView';
 import PayerView from './PayerView';
 import LenderView from './LenderView';
 
 export default function App() {
-  const [me, setMe] = useState(null);           // { role, displayName, vrn }
-  const [chain, setChain] = useState(null);     // ledger integrity result
+  const [me, setMe] = useState(() => restoreSession());  // survives page refresh
+  const [chain, setChain] = useState(null);              // ledger integrity result
+  const [notice, setNotice] = useState(null);            // e.g. "session expired"
+
+  useEffect(() => {
+    onUnauthorized(message => {
+      setMe(null); setChain(null); setNotice(message);
+    });
+  }, []);
 
   async function checkChain() {
     try { setChain(await verifyLedger()); }
     catch (e) { setChain({ valid: false, detail: e.response?.data?.error || e.message }); }
   }
 
-  function signOut() { apiLogout(); setMe(null); setChain(null); }
+  function signOut() { apiLogout(); setMe(null); setChain(null); setNotice(null); }
+
+  function onLogin(user) { setNotice(null); setMe(user); }
 
   return (
     <>
@@ -35,7 +44,8 @@ export default function App() {
         )}
       </header>
       <main className="wrap">
-        {!me && <Login onLogin={setMe} />}
+        {!me && notice && <div className="rejected"><div className="ledger-says">{notice}</div></div>}
+        {!me && <Login onLogin={onLogin} />}
         {me?.role === 'supplier' && <SupplierView me={me} />}
         {me?.role === 'payer'    && <PayerView me={me} />}
         {me?.role === 'lender'   && <LenderView me={me} />}

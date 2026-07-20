@@ -7,12 +7,14 @@ export default function LenderView({ me }) {
   const [blocked, setBlocked] = useState(null);   // the rejection message
   const [funded, setFunded] = useState(null);
   const [trail, setTrail] = useState(null);
+  const [fundingId, setFundingId] = useState(null);   // invoice currently being funded
 
   const refresh = () => listInvoices().then(setInvoices).catch(() => {});
   useEffect(() => { refresh(); }, []);
 
   async function fund(id) {
     setBlocked(null); setFunded(null);
+    setFundingId(id);
     try {
       const inv = await fundInvoice(id);
       setFunded(`${inv.invoiceNumber} financed by ${me.displayName} — funds disbursed, ledger marked FINANCED.`);
@@ -20,7 +22,7 @@ export default function LenderView({ me }) {
     } catch (e) {
       setBlocked(e.response?.data?.error || e.message);   // "DUPLICATE FINANCING BLOCKED: ..."
       refresh();
-    }
+    } finally { setFundingId(null); }
   }
 
   return (
@@ -62,11 +64,14 @@ export default function LenderView({ me }) {
                   {inv.tamperWarning && <div className="tamper" title={inv.tamperWarning}>⚠ tamper flag</div>}
                 </td>
                 <td style={{ whiteSpace: 'nowrap' }}>
-                  <button className="btn primary" disabled={inv.status === 'FINANCED' || inv.status === 'SETTLED'}
+                  <button className="btn primary"
+                          disabled={fundingId !== null || inv.status === 'FINANCED' || inv.status === 'SETTLED'}
                           onClick={() => fund(inv.invoiceId)}>
-                    {inv.status === 'FINANCED' ? `Financed by ${inv.financedBy}` : 'Fund invoice'}
+                    {fundingId === inv.invoiceId ? 'Funding…'
+                      : inv.status === 'FINANCED' ? `Financed by ${inv.financedBy}` : 'Fund invoice'}
                   </button>{' '}
-                  <button className="btn" onClick={async () => setTrail(await getHistory(inv.invoiceId))}>Audit trail</button>
+                  <button className="btn" disabled={fundingId !== null}
+                          onClick={async () => { try { setTrail(await getHistory(inv.invoiceId)); } catch {} }}>Audit trail</button>
                 </td>
               </tr>
             ))}

@@ -1,0 +1,33 @@
+# Render Blueprint — deploys the Invoice Trust Ledger as ONE web service:
+# the Express API also serves the built React portal (same origin, one URL).
+#
+# Env vars:
+#   LEDGER_MODE    mock  — persistent hash-chained ledger file, no Docker/Fabric
+#   AUTO_SEED      true  — on boot with an empty ledger, seed the two demo
+#                  invoices in-process (survives the free tier's disk wipes)
+#   JWT_SECRET     required — Render generates a random one below
+#   GEMINI_API_KEY optional — leave blank to use the built-in simulated OCR
+#
+# Free-tier caveats (fine for a demo):
+#   - the service sleeps after ~15 min idle; first request takes ~30s to wake
+#   - the filesystem is ephemeral: data/ledger.json resets on every deploy or
+#     restart — AUTO_SEED reseeds the demo data automatically on each cold boot
+services:
+  - type: web
+    name: invoice-trust-ledger
+    runtime: node
+    plan: free
+    buildCommand: npm ci --prefix portal && npm ci --prefix api && node api/build-portal.js
+    startCommand: node api/server.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: LEDGER_MODE
+        value: mock
+      - key: AUTO_SEED
+        value: "true"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: GEMINI_API_KEY   # optional — blank means simulated OCR extraction
+        sync: false

@@ -38,6 +38,34 @@ cd portal && npm install && npm run dev     # http://localhost:5173
 
 Demo logins (password `demo123`): `supplier1` · `payer1` · `lloyds` · `otherbank`.
 
+## One-URL hosted demo (Render free tier)
+
+The whole thing deploys as **one web service**: the Express API serves the built
+portal from `api/public`, so a single URL is both the app and the API.
+
+```bash
+# build the portal into api/public, then serve everything on :3000
+cd portal && npm install
+cd ../api && npm run build:portal && node server.js   # http://localhost:3000 = full app
+```
+
+`render.yaml` at the repo root is a Render Blueprint that does the same build in
+the cloud. Env vars: `LEDGER_MODE=mock`, `JWT_SECRET` (auto-generated),
+`GEMINI_API_KEY` (optional — blank falls back to simulated OCR).
+
+**Free-tier caveats (acceptable for a demo):** the service sleeps after ~15 min
+idle (first request takes ~30 s to wake), and the filesystem is ephemeral — the
+mock ledger in `data/ledger.json` **resets on every redeploy or restart**. Just
+rerun the seed against the live URL:
+
+```bash
+API_URL=https://your-app.onrender.com node api/seed.js
+```
+
+Local dev is unchanged: the Vite dev server (`npm run dev`, port 5173) points at
+`http://localhost:3000` via `portal/.env.development`; the hosted build uses
+same-origin calls (empty `VITE_API_URL`).
+
 ## The GCUL story
 
 GCUL (Google Cloud Universal Ledger) is in private testnet — no public access or

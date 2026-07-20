@@ -1,7 +1,9 @@
 'use strict';
 // Run: node seed.js   (server must be running)
+// Against a hosted deploy: node seed.js https://your-app.onrender.com
+//                      or: API_URL=https://your-app.onrender.com node seed.js
 // Seeds: INV-2026-001 already FINANCED by Lloyds, INV-2026-002 APPROVED and ready to fund.
-const API = 'http://localhost:3000';
+const API = process.argv[2] || process.env.API_URL || 'http://localhost:3000';
 
 async function post(p, body, token) {
     const r = await fetch(API + p, { method: 'POST',

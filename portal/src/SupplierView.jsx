@@ -12,6 +12,7 @@ export default function SupplierView({ me }) {
   const [result, setResult] = useState(null);   // { ok, message }
   const [invoices, setInvoices] = useState([]);
   const [trail, setTrail] = useState(null);
+  const [busy, setBusy] = useState(false);
 
   const refresh = () => listInvoices().then(setInvoices).catch(() => {});
   useEffect(() => { refresh(); }, []);
@@ -39,6 +40,7 @@ export default function SupplierView({ me }) {
 
   async function register() {
     setResult(null);
+    setBusy(true);
     try {
       const inv = await registerInvoice(fields, file);
       setResult({ ok: true, message: `Registered as ${inv.invoiceId} — status ${inv.status}. Document hash anchored on-chain.` });
@@ -46,7 +48,7 @@ export default function SupplierView({ me }) {
       refresh();
     } catch (e) {
       setResult({ ok: false, message: e.response?.data?.error || e.message });
-    }
+    } finally { setBusy(false); }
   }
 
   const mine = invoices.filter(i => i.supplierVRN === me.vrn);
@@ -77,8 +79,8 @@ export default function SupplierView({ me }) {
             <input type="date" value={fields.dueDate} onChange={e => set('dueDate', e.target.value)} /></label>
         </div>
         <div style={{ marginTop: 14 }}>
-          <button className="btn primary" disabled={!fields.invoiceNumber || !fields.amount}
-                  onClick={register}>Register on ledger</button>
+          <button className="btn primary" disabled={busy || !fields.invoiceNumber || !fields.amount}
+                  onClick={register}>{busy ? 'Registering…' : 'Register on ledger'}</button>
         </div>
       </div>
 
@@ -102,7 +104,8 @@ export default function SupplierView({ me }) {
                 <td><span className={`badge ${inv.status}`}>{inv.status}</span>
                   {inv.tamperWarning && <div className="tamper">⚠ tamper flag</div>}</td>
                 <td className="sub">{new Date(inv.registeredAt).toLocaleString()}</td>
-                <td><button className="btn" onClick={async () => setTrail(await getHistory(inv.invoiceId))}>Audit trail</button></td>
+                <td><button className="btn" disabled={busy}
+                            onClick={async () => { try { setTrail(await getHistory(inv.invoiceId)); } catch {} }}>Audit trail</button></td>
               </tr>
             ))}
           </tbody>

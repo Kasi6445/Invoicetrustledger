@@ -163,6 +163,7 @@ input:focus { border-color: var(--green); }
   padding: 16px; transition: border-color .12s;
 }
 .login-card:hover { border-color: var(--green); }
+.login-card.selected { border-color: var(--green); box-shadow: 0 0 0 1px var(--green); }
 .login-card .r { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--green); }
 .login-card .n { font-size: 15px; font-weight: 650; margin-top: 3px; }
 .login-card .d { font-size: 12px; color: var(--muted); margin-top: 6px; }
