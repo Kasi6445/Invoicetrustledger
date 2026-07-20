@@ -1,0 +1,139 @@
+# RUNBOOK — 3 days to demo. Commands only.
+
+Rule one: stuck >15 min → paste the command + FULL output into Claude.
+
+---
+
+## DAY 1 — Working demo in mock mode (no Docker needed). ~2–3 h
+
+Prereq: Node.js 20+ (`node -v`). Windows: do everything inside the Ubuntu (WSL) terminal.
+
+```bash
+# 1. Put the project in place (adjust if you cloned from GitHub instead)
+cd ~ && unzip invoice-trust-ledger.zip && cd invoice-trust-ledger
+
+# 2. API
+cd api
+cp .env.example .env          # defaults are fine: LEDGER_MODE=mock
+npm install
+node server.js                # leave running
+```
+
+New terminal:
+```bash
+cd ~/invoice-trust-ledger/api
+bash test-flow.sh             # MUST print: RESULT: 13 passed, 0 failed
+node seed.js                  # demo data: one FINANCED, one APPROVED invoice
+```
+
+New terminal:
+```bash
+cd ~/invoice-trust-ledger/portal
+npm install
+npm run dev                   # open http://localhost:5173
+```
+
+Click through the whole demo now (script in DEMO_SCRIPT.md):
+supplier1 register → payer1 approve → lloyds fund → **otherbank fund → red DUPLICATE FINANCING BLOCKED banner** → audit trail → "verify ledger" pill in the header.
+
+✅ Day 1 gate: test-flow.sh all green + you performed the kill shot in the browser.
+**From this moment you always have a demo.** Everything after is upgrade, not risk.
+
+Reset demo data anytime (mock mode): stop API → `rm -rf api/data` → start API → `node seed.js`.
+
+---
+
+## DAY 2 — Real blockchain + real AI. ~3–4 h
+
+### 2a. Gemini key (10 min)
+aistudio.google.com → Get API key → paste into `api/.env` as `GEMINI_API_KEY=` → restart `node server.js`.
+Test: upload `docs/test-invoices/invoice-clean.html` (print it to PDF first: open in browser → Ctrl+P → Save as PDF) in SupplierView → fields fill from the real document.
+No key / no internet? The API auto-falls back to built-in sample fields (labelled simulated) — demo never dies.
+
+### 2b. Docker + Fabric
+Install Docker per the build guide §4 (Windows: WSL2 first, then Docker Desktop with WSL integration ON). Gate: `docker run hello-world`.
+
+```bash
+# Download Fabric samples + binaries + images (one-time, use hotspot if office network blocks it)
+cd ~ && mkdir -p fabric && cd fabric
+curl -sSL https://raw.githubusercontent.com/hyperledger/fabric/main/scripts/install-fabric.sh -o install-fabric.sh
+chmod +x install-fabric.sh
+./install-fabric.sh docker samples binary
+
+# Start the network
+cd ~/fabric/fabric-samples/test-network
+./network.sh down
+./network.sh up createChannel -c mychannel -ca
+docker ps --format 'table {{.Names}}\t{{.Status}}'   # peers + orderer + CAs all "Up"
+
+# Deploy OUR chaincode
+./network.sh deployCC -ccn invoicecc -ccp ~/invoice-trust-ledger/chaincode -ccl javascript
+```
+
+Smoke test (optional but 2 min — proves chaincode works before touching the API):
+```bash
+cd ~/fabric/fabric-samples/test-network
+export PATH=${PWD}/../bin:$PATH
+export FABRIC_CFG_PATH=$PWD/../config/
+export CORE_PEER_TLS_ENABLED=true
+export CORE_PEER_LOCALMSPID=Org1MSP
+export CORE_PEER_TLS_ROOTCERT_FILE=${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt
+export CORE_PEER_MSPCONFIGPATH=${PWD}/organizations/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp
+export CORE_PEER_ADDRESS=localhost:7051
+
+peer chaincode invoke -o localhost:7050 --ordererTLSHostnameOverride orderer.example.com --tls \
+  --cafile "${PWD}/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem" \
+  -C mychannel -n invoicecc \
+  --peerAddresses localhost:7051 --tlsRootCertFiles "${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt" \
+  --peerAddresses localhost:9051 --tlsRootCertFiles "${PWD}/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt" \
+  -c '{"function":"RegisterInvoice","Args":["inv-cli-001","INV-CLI-001","Sri Lakshmi Textiles","VRN123456","BigRetail Ltd","500000","INR","2026-08-30","no-document"]}'
+
+sleep 2
+peer chaincode query -C mychannel -n invoicecc -c '{"function":"ReadInvoice","Args":["inv-cli-001"]}'
+# Run the SAME invoke again → must FAIL with DUPLICATE REGISTRATION BLOCKED ✅
+```
+
+### 2c. Flip the API to the real chain
+```bash
+# api/.env:
+#   LEDGER_MODE=fabric
+#   FABRIC_SAMPLES=/home/<yourname>/fabric/fabric-samples     (run: whoami)
+cd ~/invoice-trust-ledger/api
+node server.js                # restart
+bash test-flow.sh             # same 13 greens — now every write is a Fabric transaction
+node seed.js
+```
+Open the portal → audit trail → the tx ids are now genuine Fabric transaction ids.
+
+✅ Day 2 gate: test-flow.sh green in fabric mode.
+❌ Docker impossible on every machine? **Plan B = stay in mock mode.** It's already a persistent, hash-chained, tamper-evident ledger with `verifyChain()` — see JUDGE_QA.md for the exact pitch line. Zero code changes.
+
+---
+
+## DAY 3 — Rehearse & harden. ~2–3 h
+
+```bash
+# The morning ritual (memorise; also needed after any reboot):
+# fabric mode:
+cd ~/fabric/fabric-samples/test-network && ./network.sh down && ./network.sh up createChannel -c mychannel -ca && ./network.sh deployCC -ccn invoicecc -ccp ~/invoice-trust-ledger/chaincode -ccl javascript
+cd ~/invoice-trust-ledger/api && node server.js &
+sleep 2 && node seed.js
+cd ~/invoice-trust-ledger/portal && npm run dev
+# mock mode: skip the fabric lines, just rm -rf api/data first.
+```
+
+1. Print both files in `docs/test-invoices/` to PDF (clean ₹5,00,000 + tampered ₹7,50,000). Keep on desktop.
+2. Run DEMO_SCRIPT.md end-to-end ×3, timed under 7 min. The tampered PDF at step 6 shows the ⚠ tamper flag live.
+3. Reset drill once: full down → up → deploy → seed → demo in under 10 min.
+4. Screen-record one perfect run (backup video on phone + pen drive).
+5. Read JUDGE_QA.md out loud once as a team. Freeze code — no changes after tonight.
+
+Pre-walk-in checklist: network up (fabric mode) · API running · seeded · portal open · both PDFs on desktop · hotspot on (Gemini) · notifications off · browser zoom 125% · backup video reachable.
+
+---
+
+## LATER — The GCUL swap (when Google grants access)
+
+1. Port the rules in `docs/RULES.md` to a GCUL Python smart contract (they are written language-neutrally for exactly this).
+2. Implement `api/gculLedger.js` — the interface and per-function mapping are documented inside the file.
+3. `api/.env` → `LEDGER_MODE=gcul` → restart → `bash test-flow.sh`. Same 13 tests must pass. Nothing else in the system changes.

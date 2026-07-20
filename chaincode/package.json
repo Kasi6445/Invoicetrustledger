@@ -1,0 +1,12 @@
+{
+  "name": "invoice-chaincode",
+  "version": "1.0.0",
+  "description": "Invoice Trust Ledger smart contract",
+  "main": "index.js",
+  "engines": { "node": ">=18" },
+  "scripts": { "start": "fabric-chaincode-node start" },
+  "dependencies": {
+    "fabric-contract-api": "^2.5.1",
+    "fabric-shim": "^2.5.1"
+  }
+}
