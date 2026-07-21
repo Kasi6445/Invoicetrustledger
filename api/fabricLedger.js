@@ -38,9 +38,20 @@ module.exports = async function fabricLedger() {
 
     const contract = gateway.getNetwork('mychannel').getContract('invoicecc');
 
+    // The gateway reports an endorsement failure as a generic gRPC error
+    // ("10 ABORTED: failed to endorse transaction, ...") and hides the chaincode's
+    // own message one level down in details[]. Surface it verbatim, so a ledger
+    // rejection reads the same here as it does in mock mode — the API contract is
+    // that the rejection text reaches the caller unchanged.
+    const unwrap = (e) => {
+        const d = e.details?.[0]?.message;
+        if (d) e.message = d.replace(/^chaincode response \d+,\s*/, '');
+        throw e;
+    };
+
     return {
-        async submit(fn, ...args)   { return utf8.decode(await contract.submitTransaction(fn, ...args)); },
-        async evaluate(fn, ...args) { return utf8.decode(await contract.evaluateTransaction(fn, ...args)); },
+        async submit(fn, ...args)   { try { return utf8.decode(await contract.submitTransaction(fn, ...args)); } catch (e) { unwrap(e); } },
+        async evaluate(fn, ...args) { try { return utf8.decode(await contract.evaluateTransaction(fn, ...args)); } catch (e) { unwrap(e); } },
         async verifyChain() {
             return { valid: true, mode: 'fabric',
                      note: 'Integrity is guaranteed by Fabric consensus across peers — see docker ps and the audit-trail tx ids.' };
