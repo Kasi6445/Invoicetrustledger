@@ -122,7 +122,10 @@ verifyChain()          // tamper-evidence proof (backend-appropriate)
 `mockLedger.js` and `chaincode/lib/invoiceContract.js` are two independent implementations of the
 exact same rules — **when changing a business rule, update both**, and re-run `test-flow.sh`
 against whichever mode you can (mock is free; fabric requires the Day 2 network setup in
-`docs/RUNBOOK.md`). `docs/RULES.md` is the single source of truth for those rules — read it before
+`docs/RUNBOOK.md`). Note that the fabric error-surfacing fix (rejection messages were arriving as
+a generic gRPC envelope; `fabricLedger.js` now unwraps `details[0].message`) was a change to the
+*adapter* only — it touched no rule logic, so it needed no dual update. Those two files remain the
+only two rule implementations; the dual-update rule applies to business rules, not to adapters. `docs/RULES.md` is the single source of truth for those rules — read it before
 changing invariants, and update it alongside the code. `gculLedger.js` is a documented stub (not
 yet implementable — GCUL has no public access); it exists to show the migration is scoped to one
 file.

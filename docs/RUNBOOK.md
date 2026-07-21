@@ -2,6 +2,12 @@
 
 Rule one: stuck >15 min → paste the command + FULL output into Claude.
 
+> **Known cleanup item:** this file is duplicated at `RUNBOOK.md` (repo root) and
+> `docs/RUNBOOK.md`, byte-for-byte. Both must be edited together or they drift. CLAUDE.md
+> points at the `docs/` copy. Worth collapsing to one file (make the other a symlink, or
+> delete the root copy and fix the references) — not urgent, but do it before the two
+> versions diverge silently.
+
 ---
 
 ## DAY 1 — Working demo in mock mode (no Docker needed). ~2–3 h
