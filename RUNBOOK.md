@@ -90,7 +90,27 @@ peer chaincode invoke -o localhost:7050 --ordererTLSHostnameOverride orderer.exa
 
 sleep 2
 peer chaincode query -C mychannel -n invoicecc -c '{"function":"ReadInvoice","Args":["inv-cli-001"]}'
-# Run the SAME invoke again → must FAIL with DUPLICATE REGISTRATION BLOCKED ✅
+
+# Duplicate check. Re-running the SAME invoke verbatim is NOT the right test: it
+# trips Rule 0 ("Invoice id inv-cli-001 already exists"), which is checked before
+# the fingerprint and only proves the ledger key is taken. To exercise R1 you need
+# a DIFFERENT invoiceId carrying the same invoiceNumber + supplierVRN + amount, so
+# the fingerprint collides:
+peer chaincode invoke -o localhost:7050 --ordererTLSHostnameOverride orderer.example.com --tls \
+  --cafile "${PWD}/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem" \
+  -C mychannel -n invoicecc \
+  --peerAddresses localhost:7051 --tlsRootCertFiles "${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt" \
+  --peerAddresses localhost:9051 --tlsRootCertFiles "${PWD}/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt" \
+  -c '{"function":"RegisterInvoice","Args":["inv-cli-002","INV-CLI-001","Sri Lakshmi Textiles","VRN123456","BigRetail Ltd","500000","INR","2026-08-30","no-document"]}'
+# → must FAIL with DUPLICATE REGISTRATION BLOCKED ✅
+# What this proves: the same real-world invoice cannot be put on the ledger twice
+# even under a brand-new ledger key — i.e. the fraud rule is enforced on invoice
+# IDENTITY (number+supplier+amount), not merely on the storage key. That is the
+# registration-side counterpart to the DUPLICATE FINANCING BLOCKED kill shot.
+
+# Optional, proves R2 (tamper flag): same number+supplier, DIFFERENT amount →
+# this one is ALLOWED but comes back stamped with a permanent tamperWarning.
+# Re-run the invoke above with Args inv-cli-003 / ... / "750000" and read the payload.
 ```
 
 ### 2c. Flip the API to the real chain

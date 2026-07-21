@@ -45,6 +45,48 @@ npm run build
 # see docs/RUNBOOK.md Day 2 for network.sh / deployCC commands
 ```
 
+## Morning ritual — fabric mode from cold
+
+Every command below has been run end-to-end on this machine. Order matters; the three
+prerequisites are the ones that actually bite.
+
+```bash
+# 0. PREREQS — check these first, they fail silently otherwise.
+#    a) Docker Desktop has AutoStart OFF, so after any reboot it must be started by hand.
+#       WSL sees the engine only once /var/run/docker.sock exists — wait for it:
+docker ps >/dev/null 2>&1 || echo "start Docker Desktop, then re-check"
+#       If docker was working and then stops with "Input/output error" on /usr/bin/docker,
+#       Docker Desktop died and left a stale cli-tools mount. Restart it from Windows:
+#       "/mnt/c/Program Files/Docker/Docker/resources/bin/docker.exe" desktop restart
+#    b) jq MUST be on PATH — network.sh uses it to set anchor peers, and WITHOUT it the
+#       network still comes "up" but anchor peers are never set, which breaks the Gateway
+#       SDK's service discovery later. Installed here (no sudo needed):
+which jq || curl -sSL -o ~/.local/bin/jq \
+  https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64 && chmod +x ~/.local/bin/jq
+#    c) Node 20 lives in ~/.local/node20 — confirm `node -v` is v20.x.
+
+# 1. Network + chaincode (from ~/fabric/fabric-samples/test-network)
+cd ~/fabric/fabric-samples/test-network
+./network.sh down                      # ONLY when resetting; skip on a clean boot
+./network.sh up createChannel -c mychannel -ca
+./network.sh deployCC -ccn invoicecc -ccp ~/invoice-trust-ledger/chaincode -ccl javascript
+docker ps --format 'table {{.Names}}\t{{.Status}}'
+# expect 8 containers: 2 peers + orderer + 3 CAs + 2 dev-peer chaincode containers
+
+# 2. API
+cd ~/invoice-trust-ledger/api        # .env: LEDGER_MODE=fabric, FABRIC_SAMPLES=/home/sandh/fabric/fabric-samples
+node server.js &
+sleep 2 && node seed.js
+
+# 3. Portal
+cd ~/invoice-trust-ledger/portal && npm run dev
+```
+
+Mock mode instead: skip step 1 entirely, set `LEDGER_MODE=mock`, and `rm -rf api/data` first.
+
+Fabric state does NOT persist across `network.sh down` — the ledger is wiped, so re-run
+`seed.js` every time. Mock mode persists in `api/data/ledger.json` until you delete it.
+
 There is no separate unit test framework — `api/test-flow.sh` (curl against a running server) is
 the conformance test for the whole system, and it must pass identically against every ledger
 backend. There's no single-test-runner concept; it's one linear script of 13 checks against a
