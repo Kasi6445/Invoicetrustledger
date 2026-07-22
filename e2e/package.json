@@ -1,0 +1,17 @@
+{
+  "name": "invoice-trust-ledger-e2e",
+  "private": true,
+  "description": "End-to-end regression + video evidence suite for the Invoice Trust Ledger prototype",
+  "scripts": {
+    "test": "playwright test",
+    "test:ui": "playwright test --project=ui-evidence",
+    "test:ui:headed": "playwright test --project=ui-evidence --headed",
+    "test:api": "playwright test --project=api-regression",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0",
+    "@types/node": "^20.14.0",
+    "typescript": "^5.6.0"
+  }
+}
