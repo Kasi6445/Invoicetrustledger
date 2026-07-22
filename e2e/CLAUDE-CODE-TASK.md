@@ -7,10 +7,14 @@ in order. Ask before doing anything destructive.
 
 ## 0. Context you must read first
 
-- Read `tests/invoice-lifecycle.spec.ts` and `tests/api-regression.spec.ts`
-  top-of-file comments — they explain the flow and the repeatability design
-  (unique invoice numbers per run, because the chaincode permanently blocks
-  duplicate fingerprints).
+- Read the top-of-file comments in ALL THREE specs:
+  `tests/api-regression.spec.ts` (backend contract),
+  `tests/invoice-lifecycle.spec.ts` (full flow, unique numbers = repeatable),
+  `tests/real-documents.spec.ts` (the actual fixture PDFs AS-IS: duplicate
+  registration blocked, tampered-PDF tamper flag, OCR across two layouts,
+  and a cryptographic docHash === sha256(file) proof). The real-documents
+  spec is STATE-TOLERANT: it inspects the ledger via API first and branches,
+  so it passes on a fresh ledger AND on one already carrying INV-2026-007.
 - Read `../portal/src/Login.jsx`, `SupplierView.jsx`, `PayerView.jsx`,
   `App.jsx`, `LenderView.jsx`, `AuditTrail.jsx`. The first four were
   AI-generated, so the spec's selectors marked `[ADAPT]` are best-effort
@@ -28,11 +32,24 @@ All three must already be running (start them if not, each in its own terminal):
    — confirm it logs `Ledger mode: fabric` on first ledger call
 3. Portal: `cd ~/invoice-trust-ledger/portal && npm run dev`
 
-Copy the PDF fixture (adjust the Windows username):
+ALL THREE fixture PDFs must be in `fixtures/`:
 
-    cp /mnt/c/Users/<WindowsName>/Downloads/invoice-clean-INV-2026-007.pdf fixtures/
+    invoice-clean-INV-2026-007.pdf
+    invoice-TAMPERED-INV-2026-007.pdf
+    invoice-clean-INV-2026-014.pdf
 
-If the file cannot be found, ask the user where they saved it.
+Copy any missing ones from Windows Downloads (adjust the username):
+
+    cp /mnt/c/Users/<WindowsName>/Downloads/invoice-*.pdf fixtures/
+
+(The clean 007 also exists in `../api/data/docs/` from the morning's upload.)
+If a file cannot be found, ask the user where they saved it.
+
+Verify the Gemini key is live WITHOUT printing it:
+
+    cd ../api && node -e "require('dotenv').config(); console.log('key length:', (process.env.GEMINI_API_KEY||'').length)" && cd ../e2e
+
+Length ~40-55 = fine. 0 or 19 = placeholder; stop and ask the user to fix it.
 
 ## 2. Install
 
@@ -48,18 +65,22 @@ as errors name them.)
 1. `npm run test:api` first — it is selector-proof and validates the whole
    backend contract. If anything fails here, the problem is servers/chaincode,
    NOT the UI spec. Fix that first (check the API terminal's output).
-2. `npm run test:ui:headed` — watch it drive the browser. On any selector
-   failure: open the failing component in `../portal/src/`, fix the locator in
-   the spec, re-run. Iterate until green. Do NOT weaken assertions to pass —
-   the assertions ARE the evidence.
-3. Final clean run for the record: `npm run test:ui` (headless).
+2. `npx playwright test tests/invoice-lifecycle.spec.ts --project=ui-evidence --headed`
+   — watch it drive the browser. On any selector failure: open the failing
+   component in `../portal/src/`, fix the locator in the spec, re-run.
+   Iterate until green. Do NOT weaken assertions to pass — the assertions
+   ARE the evidence.
+3. `npx playwright test tests/real-documents.spec.ts --project=ui-evidence --headed`
+   — same drill. This spec uploads real PDFs 3-4 times (Gemini calls), so if
+   iterating on selector fixes, wait ~60s between attempts.
+4. Final clean run for the record, everything headless: `npm run test`.
 
 ## 4. Constraints — do not violate
 
-- **Gemini quota:** the UI test makes exactly ONE Gemini call per run
-  (the PDF upload). Free tier is 10 req/min. Never loop the UI test rapidly;
-  wait ~60s between UI runs if a 429 appears. The API suite makes ZERO
-  Gemini calls and can be run freely.
+- **Gemini quota:** a full UI run makes up to 5 /ai/extract calls
+  (1 lifecycle + up to 4 real-documents). Free tier is 10 req/min, ~250/day.
+  Wait ~60s between full UI runs; on a 429, wait 60s and rerun only the
+  failing spec. The API suite makes ZERO Gemini calls and can be run freely.
 - **Never** print, log, echo, or commit the contents of `../api/.env`.
 - Do not modify chaincode, API, or portal source to make tests pass, with one
   exception: if a portal component has a genuine bug the test exposes, report
@@ -68,16 +89,22 @@ as errors name them.)
 
 ## 5. Deliverables — collect and report
 
-When green, tell the user exactly where these are:
+When green, produce the evidence package:
 
-- `evidence/*.png` — numbered screenshots of every key moment
-  (OCR autofill, registered, approved, financed, KILL SHOT banner,
-  audit trail, tamper flag)
-- `evidence/otherbank-kill-shot.webm` — the second lender's screen recording
-  showing the red DUPLICATE FINANCING BLOCKED banner
-- Main flow video: `test-results/**/video.webm` (also embedded in the HTML
-  report)
-- `npm run report` — the shareable HTML report with trace + videos
+1. Write `evidence/INDEX.md`: one line per artifact explaining what it proves,
+   grouped by scenario, quoting the docHash lines from `evidence/hash-proof.txt`.
+2. Copy the main-flow video(s) from `test-results/**/video.webm` into
+   `evidence/` with descriptive names (e.g. `full-lifecycle.webm`).
+3. `cd .. && zip -r e2e/evidence-package.zip e2e/evidence e2e/playwright-report`
+4. Tell the user the absolute paths of: `evidence/` (with INDEX.md),
+   `evidence-package.zip`, and how to open the HTML report (`npm run report`).
+
+Expected artifacts checklist:
+- 01-08 PNGs (lifecycle: OCR, registered, approved, financed, KILL SHOT,
+  audit trail, tamper flag) + R1-R4 PNGs (second layout OCR, duplicate
+  registration blocked, tampered OCR, lender tamper flag)
+- `otherbank-kill-shot.webm` + full-flow videos
+- `hash-proof.txt` — sha256(file) vs on-chain docHash, matching
 
 Finally, offer to commit the suite:
 `git add e2e && git commit -m "e2e evidence suite" ` — confirm with the user

@@ -58,11 +58,19 @@ async function shot(page: Page, name: string) {
   await page.screenshot({ path: file, fullPage: true });
 }
 
-/** Login screen has four role buttons (Supplier · Payer · Lloyds Bank · OtherBank NBFC). */
+/** Login screen has four role cards (Supplier · Payer · Lloyds Bank · OtherBank NBFC).
+ *  Reconciled against Login.jsx: a role card only PRE-FILLS the username — real
+ *  authentication happens on form submit with the password. */
 async function loginAs(page: Page, who: RegExp) {
   await page.goto('/');
-  // [ADAPT] if Login.jsx uses different button labels, align this regex.
+  // sessionStorage keeps a session alive across goto/reload — sign out first if so.
+  const logoutBtn = page.getByRole('button', { name: /log ?out|sign ?out/i }).first();
+  if (await logoutBtn.isVisible().catch(() => false)) await logoutBtn.click();
   await page.getByRole('button', { name: who }).first().click();
+  await page.getByLabel(/password/i).fill('demo123');
+  await page.getByRole('button', { name: /^sign in$/i }).click();
+  await expect(page.getByRole('button', { name: /log ?out/i }))
+    .toBeVisible({ timeout: 15_000 });
 }
 
 async function logout(page: Page) {
@@ -86,16 +94,23 @@ async function fillSmart(loc: Locator, value: string) {
   else await loc.fill(value);
 }
 
-/** Read ledger state through the API so UI assertions never race the chain. */
+/** Read ledger state through the API so UI assertions never race the chain.
+ *  Token is cached: this runs inside expect.poll loops, and logging in every
+ *  iteration trips the API's /auth/login rate limit (20/min). */
+let apiToken: string | null = null;
 async function apiState(requestFetch: typeof fetch, invNo: string) {
-  const login = await requestFetch('http://localhost:3000/auth/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: 'lloyds', password: 'demo123' }),
-  }).then((r) => r.json());
+  if (!apiToken) {
+    const login = await requestFetch('http://localhost:3000/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'lloyds', password: 'demo123' }),
+    }).then((r) => r.json());
+    apiToken = login.token;
+  }
   const all = await requestFetch('http://localhost:3000/invoices', {
-    headers: { Authorization: `Bearer ${login.token}` },
+    headers: { Authorization: `Bearer ${apiToken}` },
   }).then((r) => r.json());
+  if (!Array.isArray(all)) { apiToken = null; return []; } // bad/expired token: retry next poll
   return (all as any[]).filter((i) => i.invoiceNumber === invNo);
 }
 
@@ -149,12 +164,12 @@ test('full invoice lifecycle: OCR → register → approve → fund → DUPLICAT
     await logout(page);
     await loginAs(page, /payer|bigretail/i);
 
-    // [ADAPT] PayerView lists REGISTERED invoices with an Approve button per row.
-    const row = page.locator('tr, li, div').filter({ hasText: INV_NO }).last();
+    // Reconciled against PayerView.jsx: pending REGISTERED invoices are table
+    // rows, each with its own Approve button. Other REGISTERED invoices may
+    // coexist (e.g. the API suite's), so scope strictly to our row.
+    const row = page.locator('tr').filter({ hasText: INV_NO }).first();
     await expect(row).toBeVisible({ timeout: 15_000 });
-    await row.getByRole('button', { name: /approve/i }).first()
-      .or(page.getByRole('button', { name: /approve/i }).first())
-      .click();
+    await row.getByRole('button', { name: /approve/i }).click();
 
     await expect
       .poll(async () => (await apiState(fetch, INV_NO))[0]?.status, {
@@ -273,8 +288,16 @@ test('full invoice lifecycle: OCR → register → approve → fund → DUPLICAT
 
     await logout(page);
     await loginAs(page, /lloyds/i);
-    await expect(page.getByText(/tamper flag/i).first(),
-      'lender must see the on-ledger tamper warning').toBeVisible({ timeout: 15_000 });
+    // Reconciled against LenderView.jsx: the visible warning is the div.tamper
+    // badge ("⚠ tamper flag") on the altered row; a collapsed risk-reasons
+    // <details> also *contains* the words "tamper flag", so scope precisely.
+    const tamperedRow = page.locator('tr')
+      .filter({ hasText: INV_NO })
+      .filter({ hasText: /7,?50,?000/ })
+      .first();
+    await expect(tamperedRow).toBeVisible({ timeout: 15_000 });
+    await expect(tamperedRow.locator('div.tamper'),
+      'lender must see the on-ledger tamper warning').toBeVisible();
 
     await shot(page, 'lender-tamper-flag');
   });

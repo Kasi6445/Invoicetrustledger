@@ -33,7 +33,7 @@ export default defineConfig({
   projects: [
     {
       name: 'ui-evidence',
-      testMatch: /invoice-lifecycle\.spec\.ts/,
+      testMatch: /(invoice-lifecycle|real-documents)\.spec\.ts/,
       use: {
         baseURL: 'http://localhost:5173',
         viewport: { width: 1280, height: 800 },

@@ -3,7 +3,11 @@ import * as path from 'path';
 
 const API = 'http://localhost:3000';
 const PORTAL = 'http://localhost:5173';
-const PDF = path.join(__dirname, 'fixtures', 'invoice-clean-INV-2026-007.pdf');
+const FIXTURES = [
+  'invoice-clean-INV-2026-007.pdf',
+  'invoice-TAMPERED-INV-2026-007.pdf',
+  'invoice-clean-INV-2026-014.pdf',
+].map((f) => path.join(__dirname, 'fixtures', f));
 
 async function mustReach(url: string, init: RequestInit | undefined, what: string, hint: string) {
   try {
@@ -37,13 +41,16 @@ export default async function globalSetup() {
   await mustReach(PORTAL, undefined, 'The React portal',
     'Start it: cd ~/invoice-trust-ledger/portal && npm run dev');
 
-  // 3. PDF fixture present
-  if (!fs.existsSync(PDF)) {
+  // 3. All PDF fixtures present
+  const missing = FIXTURES.filter((f) => !fs.existsSync(f));
+  if (missing.length) {
     throw new Error(
-      `\n\n[global-setup] Missing PDF fixture: ${PDF}\n` +
-      `  -> Copy the demo invoice into e2e/fixtures/, e.g.:\n` +
-      `     cp /mnt/c/Users/<YourWindowsName>/Downloads/invoice-clean-INV-2026-007.pdf ` +
-      `~/invoice-trust-ledger/e2e/fixtures/\n`
+      `\n\n[global-setup] Missing PDF fixture(s):\n` +
+      missing.map((m) => `  - ${m}`).join('\n') +
+      `\n  -> Copy them into e2e/fixtures/, e.g. from Windows Downloads:\n` +
+      `     cp /mnt/c/Users/<YourWindowsName>/Downloads/invoice-*.pdf ` +
+      `~/invoice-trust-ledger/e2e/fixtures/\n` +
+      `  (the clean 007 also lives in ../api/data/docs/ from this morning's upload)\n`
     );
   }
 
