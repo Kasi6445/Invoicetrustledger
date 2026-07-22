@@ -4,7 +4,7 @@ require('dotenv').config();
 // Uses Google's REST endpoint directly — no SDK needed.
 // If Google has renamed the flash model by demo time, list models in
 // aistudio.google.com and swap the name below.
-const MODEL = 'gemini-2.0-flash';
+const MODEL = 'gemini-2.5-flash';
 
 // Offline / no-key fallback: return realistic fields so the demo flow still
 // works on stage even if the hotspot dies. Clearly labelled as simulated.
