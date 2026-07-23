@@ -6,11 +6,12 @@ approves, lender funds — and a second lender funding the same invoice is
 
 ## Status: tested and working
 
-`api/test-flow.sh` proves the full flow end-to-end — **13/13 checks pass** in mock
-mode out of the box: all role logins, register → approve → fund lifecycle, the
-duplicate-financing block (the kill shot), duplicate-registration block, the
-tamper flag on altered resubmissions, payer/lender field masking, RBAC, the
-audit trail, and hash-chain verification.
+`api/test-flow.sh` proves the full flow end-to-end — **22/22 checks pass** in mock
+mode out of the box: all role logins, register → approve → decline → fund
+lifecycle, the duplicate-financing block (the kill shot), the single-use invoice
+number rule (altered resubmissions rejected as possible tampered/fake invoices),
+lender-to-lender anonymity ("another financial institution"), payer/lender field
+masking, RBAC, the audit trail, and hash-chain verification.
 
 ## Layout
 

@@ -28,7 +28,7 @@ node server.js                # leave running
 New terminal:
 ```bash
 cd ~/invoice-trust-ledger/api
-bash test-flow.sh             # MUST print: RESULT: 13 passed, 0 failed
+bash test-flow.sh             # MUST print: RESULT: 22 passed, 0 failed
 node seed.js                  # demo data: one FINANCED, one APPROVED invoice
 ```
 
@@ -99,24 +99,24 @@ peer chaincode query -C mychannel -n invoicecc -c '{"function":"ReadInvoice","Ar
 
 # Duplicate check. Re-running the SAME invoke verbatim is NOT the right test: it
 # trips Rule 0 ("Invoice id inv-cli-001 already exists"), which is checked before
-# the fingerprint and only proves the ledger key is taken. To exercise R1 you need
-# a DIFFERENT invoiceId carrying the same invoiceNumber + supplierVRN + amount, so
-# the fingerprint collides:
+# the number check and only proves the ledger key is taken. To exercise R1 you need
+# a DIFFERENT invoiceId carrying the same invoiceNumber + supplierVRN (amount is
+# irrelevant — the number itself is single-use per supplier):
 peer chaincode invoke -o localhost:7050 --ordererTLSHostnameOverride orderer.example.com --tls \
   --cafile "${PWD}/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem" \
   -C mychannel -n invoicecc \
   --peerAddresses localhost:7051 --tlsRootCertFiles "${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt" \
   --peerAddresses localhost:9051 --tlsRootCertFiles "${PWD}/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt" \
   -c '{"function":"RegisterInvoice","Args":["inv-cli-002","INV-CLI-001","Sri Lakshmi Textiles","VRN123456","BigRetail Ltd","500000","INR","2026-08-30","no-document"]}'
-# → must FAIL with DUPLICATE REGISTRATION BLOCKED ✅
+# → must FAIL with DUPLICATE INVOICE BLOCKED ✅
 # What this proves: the same real-world invoice cannot be put on the ledger twice
-# even under a brand-new ledger key — i.e. the fraud rule is enforced on invoice
-# IDENTITY (number+supplier+amount), not merely on the storage key. That is the
-# registration-side counterpart to the DUPLICATE FINANCING BLOCKED kill shot.
+# even under a brand-new ledger key — the rule is enforced on the invoice NUMBER
+# per supplier, not merely on the storage key. That is the registration-side
+# counterpart to the DUPLICATE FINANCING BLOCKED kill shot.
 
-# Optional, proves R2 (tamper flag): same number+supplier, DIFFERENT amount →
-# this one is ALLOWED but comes back stamped with a permanent tamperWarning.
-# Re-run the invoke above with Args inv-cli-003 / ... / "750000" and read the payload.
+# Optional, proves the tamper wording: same number+supplier, DIFFERENT amount →
+# also REJECTED, and the message ends with "Possible tampered or fake invoice."
+# Re-run the invoke above with Args inv-cli-003 / ... / "750000" and read the error.
 ```
 
 ### 2c. Flip the API to the real chain
@@ -126,7 +126,7 @@ peer chaincode invoke -o localhost:7050 --ordererTLSHostnameOverride orderer.exa
 #   FABRIC_SAMPLES=/home/<yourname>/fabric/fabric-samples     (run: whoami)
 cd ~/invoice-trust-ledger/api
 node server.js                # restart
-bash test-flow.sh             # same 13 greens — now every write is a Fabric transaction
+bash test-flow.sh             # same 22 greens — now every write is a Fabric transaction
 node seed.js
 ```
 Open the portal → audit trail → the tx ids are now genuine Fabric transaction ids.
@@ -149,7 +149,7 @@ cd ~/invoice-trust-ledger/portal && npm run dev
 ```
 
 1. Print both files in `docs/test-invoices/` to PDF (clean ₹5,00,000 + tampered ₹7,50,000). Keep on desktop.
-2. Run DEMO_SCRIPT.md end-to-end ×3, timed under 7 min. The tampered PDF at step 6 shows the ⚠ tamper flag live.
+2. Run DEMO_SCRIPT.md end-to-end ×3, timed under 7 min. The tampered PDF at step 6 is rejected live: DUPLICATE INVOICE BLOCKED … Possible tampered or fake invoice.
 3. Reset drill once: full down → up → deploy → seed → demo in under 10 min.
 4. Screen-record one perfect run (backup video on phone + pen drive).
 5. Read JUDGE_QA.md out loud once as a team. Freeze code — no changes after tonight.
@@ -162,4 +162,4 @@ Pre-walk-in checklist: network up (fabric mode) · API running · seeded · port
 
 1. Port the rules in `docs/RULES.md` to a GCUL Python smart contract (they are written language-neutrally for exactly this).
 2. Implement `api/gculLedger.js` — the interface and per-function mapping are documented inside the file.
-3. `api/.env` → `LEDGER_MODE=gcul` → restart → `bash test-flow.sh`. Same 13 tests must pass. Nothing else in the system changes.
+3. `api/.env` → `LEDGER_MODE=gcul` → restart → `bash test-flow.sh`. Same 22 tests must pass. Nothing else in the system changes.

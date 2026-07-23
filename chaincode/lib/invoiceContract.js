@@ -5,8 +5,10 @@ const crypto = require('crypto');
 /**
  * Invoice Trust Ledger — smart contract.
  * The ledger invariants (see docs/RULES.md — the portable spec for the GCUL rewrite):
- *   R1. An invoice fingerprint (number+supplier+amount) may be registered ONCE.
- *   R2. Same number+supplier with a DIFFERENT amount registers, but carries a permanent tamper flag.
+ *   R1. An invoice number may be registered ONCE per supplier — any reuse, same
+ *       or different amount, is rejected outright (duplicate invoice blocked).
+ *   R2. A lender may decline an APPROVED invoice; a decline is that lender's own
+ *       credit decision and never blocks other lenders.
  *   R3. Only a REGISTERED invoice can be APPROVED or DISPUTED.
  *   R4. Only an APPROVED invoice can be FINANCED.
  *   R5. A FINANCED invoice can NEVER be financed again (duplicate financing blocked).
@@ -24,8 +26,8 @@ class InvoiceContract extends Contract {
         return crypto.createHash('sha256').update(raw).digest('hex');
     }
 
-    // A second hash of number+supplier ONLY — used to catch "same invoice,
-    // different amount" = a possible tampered resubmission.
+    // Hash of number+supplier ONLY — the uniqueness key: an invoice number
+    // may be used once per supplier, regardless of amount.
     _numberKeyHash(invoiceNumber, supplierVRN) {
         const raw = `${invoiceNumber.trim().toUpperCase()}|${supplierVRN.trim().toUpperCase()}`;
         return crypto.createHash('sha256').update(raw).digest('hex');
@@ -58,31 +60,22 @@ class InvoiceContract extends Contract {
             throw new Error(`Invoice id ${invoiceId} already exists`);
         }
 
-        // R1 "unique invoice identity":
-        // exact duplicate (same number+supplier+amount) is REJECTED outright.
+        // R1 "one number, one registration": ANY prior invoice with the same
+        // (invoiceNumber, supplierVRN) — same or different amount — is rejected.
+        // Uniqueness is scoped per supplier on purpose: two different suppliers
+        // may legitimately use the same invoice number.
         const fp = this._fingerprint(invoiceNumber, supplierVRN, amount);
-        const fpState = await ctx.stub.getState(`FP_${fp}`);
-        if (fpState && fpState.length > 0) {
-            const prior = JSON.parse(fpState.toString());
-            throw new Error(
-                `DUPLICATE REGISTRATION BLOCKED: invoice ${invoiceNumber} from supplier ` +
-                `${supplierVRN} is already on the ledger as ${prior.invoiceId} ` +
-                `(registered ${prior.registeredAt})`
-            );
-        }
-
-        // R2 "fraud detection", simplified:
-        // same number+supplier but DIFFERENT amount => allow, but stamp a
-        // permanent tamper warning on the record for the lender to see.
-        let tamperWarning = null;
         const numKey = `NUM_${this._numberKeyHash(invoiceNumber, supplierVRN)}`;
         const numState = await ctx.stub.getState(numKey);
         if (numState && numState.length > 0) {
             const prev = JSON.parse(numState.toString());
-            tamperWarning =
-                `Invoice number ${invoiceNumber} from this supplier was previously registered ` +
-                `with amount ${prev.amount}. This submission has amount ${Number(amount)}. ` +
-                `Possible altered/resubmitted invoice.`;
+            let msg =
+                `DUPLICATE INVOICE BLOCKED: invoice number ${invoiceNumber} has already been ` +
+                `registered by supplier ${supplierVRN} (ledger record: ${prev.invoiceId}, ` +
+                `amount ${prev.amount}, registered ${prev.registeredAt}). ` +
+                `This submission has amount ${Number(amount)}. An invoice number cannot be reused.`;
+            if (Number(amount) !== Number(prev.amount)) msg += ' Possible tampered or fake invoice.';
+            throw new Error(msg);
         }
 
         const now = this._txTime(ctx);
@@ -96,16 +89,12 @@ class InvoiceContract extends Contract {
             approvedAt: null, approvedBy: null,
             financedAt: null, financedBy: null,
             settledAt: null,
-            fingerprint: fp,
-            tamperWarning
+            fingerprint: fp
         };
 
         await ctx.stub.putState(`INV_${invoiceId}`, Buffer.from(JSON.stringify(invoice)));
-        await ctx.stub.putState(`FP_${fp}`, Buffer.from(JSON.stringify({ invoiceId, registeredAt: now })));
-        if (!numState || numState.length === 0) {
-            await ctx.stub.putState(numKey,
-                Buffer.from(JSON.stringify({ invoiceId, amount: Number(amount) })));
-        }
+        await ctx.stub.putState(numKey,
+            Buffer.from(JSON.stringify({ invoiceId, amount: Number(amount), registeredAt: now })));
         return JSON.stringify(invoice);
     }
 
@@ -134,6 +123,29 @@ class InvoiceContract extends Contract {
         invoice.approvedBy = approverName;
         invoice.disputeReason = reason;
         invoice.approvedAt = this._txTime(ctx);
+        await ctx.stub.putState(`INV_${invoiceId}`, Buffer.from(JSON.stringify(invoice)));
+        return JSON.stringify(invoice);
+    }
+
+    // ---------- STEP 3b: DECLINE (lender) ----------
+    // A decline does NOT change status. The invoice remains APPROVED and any
+    // other lender can still fund it — one institution declining is its own
+    // credit decision, not a global block.
+    async DeclineInvoice(ctx, invoiceId, lenderName, reason) {
+        const invoice = await this._getInvoice(ctx, invoiceId);
+        if (invoice.status !== 'APPROVED') {
+            throw new Error(
+                `Cannot decline: invoice ${invoiceId} is ${invoice.status}; ` +
+                `only APPROVED invoices can be declined`
+            );
+        }
+        if ((invoice.declines || []).some(d => d.by === lenderName)) {
+            throw new Error(
+                `Cannot decline: ${lenderName} has already declined invoice ${invoiceId}`
+            );
+        }
+        if (!invoice.declines) invoice.declines = [];
+        invoice.declines.push({ by: lenderName, reason, at: this._txTime(ctx) });
         await ctx.stub.putState(`INV_${invoiceId}`, Buffer.from(JSON.stringify(invoice)));
         return JSON.stringify(invoice);
     }

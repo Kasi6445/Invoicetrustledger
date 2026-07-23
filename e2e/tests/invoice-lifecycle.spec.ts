@@ -15,16 +15,18 @@ import * as fs from 'fs';
  *      invoice is still APPROVED (fund button live)             <- the race
  *   5. Lloyds funds          -> FINANCED (+ masked a/c, risk grade)
  *   6. OtherBank clicks its stale Fund button ->
- *      RED BANNER: "DUPLICATE FINANCING BLOCKED"                <- KILL SHOT
+ *      RED BANNER: "DUPLICATE FINANCING BLOCKED … another
+ *      financial institution" (competitor never named)          <- KILL SHOT
  *   7. Audit trail modal     -> immutable history with real txIds
- *   8. Tamper flag: same invoice number re-registered with a
- *      different amount -> lender sees the tamper warning       (slide 11)
+ *   8. Fake resubmission: same invoice number re-registered with
+ *      a different amount -> REJECTED at registration:
+ *      "DUPLICATE INVOICE BLOCKED … Possible tampered or fake invoice."
  *   9. Negative: the full bank account number never renders
  *
- * REPEATABILITY: the chaincode permanently blocks re-registering the same
- * fingerprint (number+VRN+amount). So after asserting the OCR extracted the
- * PDF's real values, we override the invoice number with a unique per-run
- * value BEFORE registering. OCR evidence preserved, suite re-runnable.
+ * REPEATABILITY: the chaincode permanently blocks re-registering an invoice
+ * number (per supplier). So after asserting the OCR extracted the PDF's real
+ * values, we override the invoice number with a unique per-run value BEFORE
+ * registering. OCR evidence preserved, suite re-runnable.
  *
  * QUOTA: exactly ONE Gemini call per run (the PDF upload). Free tier on
  * gemini-2.5-flash = 10/min, ~250/day. Do not loop this test rapidly.
@@ -116,7 +118,7 @@ async function apiState(requestFetch: typeof fetch, invNo: string) {
 
 // ---------------------------------------------------------------------------
 
-test('full invoice lifecycle: OCR → register → approve → fund → DUPLICATE BLOCKED → audit trail → tamper flag', async ({ page, browser }, testInfo) => {
+test('full invoice lifecycle: OCR → register → approve → fund → DUPLICATE BLOCKED → audit trail → fake resubmission blocked', async ({ page, browser }, testInfo) => {
 
   // =========================================================================
   await test.step('1. SUPPLIER: upload PDF -> Gemini OCR autofills the form', async () => {
@@ -217,12 +219,22 @@ test('full invoice lifecycle: OCR → register → approve → fund → DUPLICAT
     await expect(row.getByText(/[ABC] \(\d+\)/)).toBeVisible();
 
     await row.getByRole('button', { name: /fund invoice/i }).click();
-    await expect(row.getByRole('button', { name: /financed by lloyds/i }))
-      .toBeVisible({ timeout: 30_000 });
 
+    await expect
+      .poll(async () => (await apiState(fetch, INV_NO))[0]?.status, {
+        timeout: 30_000, message: 'ledger status should become FINANCED',
+      })
+      .toBe('FINANCED');
     const [inv] = await apiState(fetch, INV_NO);
-    expect(inv.status).toBe('FINANCED');
     expect(inv.financedBy).toBe('Lloyds Bank');
+
+    // The refreshed list drops the invoice from the default "Ready to fund"
+    // tab; it now lives under "Funded by me" with a disabled Financed-by-you
+    // button — only one's OWN financing disables the button.
+    await page.getByRole('button', { name: /funded by me/i }).click();
+    const fundedRow = page.locator('tr').filter({ hasText: INV_NO }).first();
+    await expect(fundedRow).toBeVisible({ timeout: 15_000 });
+    await expect(fundedRow.getByRole('button', { name: /financed by you/i })).toBeDisabled();
 
     await shot(page, 'lloyds-financed');
   });
@@ -236,7 +248,9 @@ test('full invoice lifecycle: OCR → register → approve → fund → DUPLICAT
     await expect(otherPage.getByText(/LEDGER REJECTED THIS TRANSACTION/i))
       .toBeVisible({ timeout: 30_000 });
     await expect(otherPage.getByText(/DUPLICATE FINANCING BLOCKED/i)).toBeVisible();
-    await expect(otherPage.getByText(/already financed by Lloyds Bank/i)).toBeVisible();
+    // Lender anonymity: OtherBank is told an institution financed it — never WHICH.
+    await expect(otherPage.getByText(/another financial institution/i)).toBeVisible();
+    await expect(otherPage.getByText(/Lloyds/)).toHaveCount(0);
 
     await shot(otherPage, 'KILL-SHOT-duplicate-financing-blocked');
   });
@@ -258,15 +272,15 @@ test('full invoice lifecycle: OCR → register → approve → fund → DUPLICAT
     for (const status of [/REGISTERED/, /APPROVED/, /FINANCED/]) {
       await expect(page.getByText(status).first()).toBeVisible();
     }
-    // Fabric txIds are 64 hex chars ("tx <id>" in AuditTrail.jsx); mock uses mock-<hex>.
-    await expect(page.getByText(/tx (mock-)?[0-9a-f]{12,}/i).first()).toBeVisible();
+    // Fabric txIds are 64 hex chars ("tx <id>" in AuditTrail.jsx); mock uses tx-<hex>.
+    await expect(page.getByText(/tx (tx-|mock-)?[0-9a-f]{12,}/i).first()).toBeVisible();
 
     await shot(page, 'audit-trail-immutable-history');
     await page.getByRole('button', { name: /close/i }).click();
   });
 
   // =========================================================================
-  await test.step('8. TAMPER FLAG: same number, different amount -> lender warned', async () => {
+  await test.step('8. FAKE RESUBMISSION: same number, different amount -> BLOCKED at registration', async () => {
     // No Gemini call here — manual fields, zero quota cost.
     await logout(page);
     await loginAs(page, /supplier|sri lakshmi/i);
@@ -278,28 +292,22 @@ test('full invoice lifecycle: OCR → register → approve → fund → DUPLICAT
     await fillSmart(field(page, /due ?date/i, 'dueDate'), '2026-09-15');
     await page.getByRole('button', { name: /register/i }).click();
 
-    await expect
-      .poll(async () => (await apiState(fetch, INV_NO)).length, {
-        timeout: 30_000, message: 'the altered resubmission should also land on the ledger',
-      })
-      .toBe(2);
-    const tampered = (await apiState(fetch, INV_NO)).find((i) => i.amount === 750000)!;
-    expect(tampered.tamperWarning).toMatch(/previously registered/i);
+    // The ledger's own rejection, rendered in the supplier's red banner.
+    await expect(page.getByText(/LEDGER REJECTED THIS TRANSACTION/i))
+      .toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/DUPLICATE INVOICE BLOCKED/i)).toBeVisible();
+    await expect(page.getByText(/Possible tampered or fake invoice/i)).toBeVisible();
+    await shot(page, 'supplier-duplicate-invoice-blocked');
 
+    // The resubmission never landed: still exactly one invoice for this number.
+    expect((await apiState(fetch, INV_NO)).length).toBe(1);
+
+    // The lender never even sees a second row for the number (All tab shows
+    // everything, including invoices financed by others).
     await logout(page);
     await loginAs(page, /lloyds/i);
-    // Reconciled against LenderView.jsx: the visible warning is the div.tamper
-    // badge ("⚠ tamper flag") on the altered row; a collapsed risk-reasons
-    // <details> also *contains* the words "tamper flag", so scope precisely.
-    const tamperedRow = page.locator('tr')
-      .filter({ hasText: INV_NO })
-      .filter({ hasText: /7,?50,?000/ })
-      .first();
-    await expect(tamperedRow).toBeVisible({ timeout: 15_000 });
-    await expect(tamperedRow.locator('div.tamper'),
-      'lender must see the on-ledger tamper warning').toBeVisible();
-
-    await shot(page, 'lender-tamper-flag');
+    await page.getByRole('button', { name: /^All \(/ }).click();
+    await expect(page.locator('tr').filter({ hasText: INV_NO })).toHaveCount(1);
   });
 
   // =========================================================================

@@ -9,8 +9,9 @@ import { test, expect, APIRequestContext } from '@playwright/test';
  * Every rule from slide 10 gets a direct assertion, including the two
  * rejections the whole project exists for:
  *
- *   - DUPLICATE REGISTRATION BLOCKED   (same fingerprint twice)
- *   - DUPLICATE FINANCING BLOCKED      (the kill shot, from the chaincode)
+ *   - DUPLICATE INVOICE BLOCKED    (an invoice number is single-use per supplier)
+ *   - DUPLICATE FINANCING BLOCKED  (the kill shot, from the chaincode — with the
+ *                                   competitor's name masked for the losing lender)
  *
  * Repeatable: every run uses fresh unique invoice numbers.
  * Zero Gemini calls: registrations here are JSON-only (no /ai/extract).
@@ -82,13 +83,24 @@ test.describe('Invoice Trust Ledger — API business rules', () => {
     expect(inv.financedBy).toBeNull();
   });
 
-  test('RULE — duplicate registration is BLOCKED by the ledger', async ({ request }) => {
-    const r = await request.post('/invoices', {
+  test('RULE — re-using an invoice number is BLOCKED by the ledger', async ({ request }) => {
+    const exact = await request.post('/invoices', {
       headers: auth(t.supplier),
-      data: registerBody(INV_A), // identical fingerprint
+      data: registerBody(INV_A), // identical resubmission
     });
-    expect(r.status()).toBe(409);
-    expect((await r.json()).error).toMatch(/DUPLICATE REGISTRATION BLOCKED/i);
+    expect(exact.status()).toBe(409);
+    const exactErr = (await exact.json()).error;
+    expect(exactErr).toMatch(/DUPLICATE INVOICE BLOCKED/i);
+    expect(exactErr).not.toMatch(/tampered or fake/i); // same amount: no tamper note
+
+    const altered = await request.post('/invoices', {
+      headers: auth(t.supplier),
+      data: registerBody(INV_A, 750000), // same number, inflated amount
+    });
+    expect(altered.status()).toBe(409);
+    const alteredErr = (await altered.json()).error;
+    expect(alteredErr).toMatch(/DUPLICATE INVOICE BLOCKED/i);
+    expect(alteredErr).toMatch(/Possible tampered or fake invoice/i);
   });
 
   test('RULE — only the payer may approve; lender/supplier get 403', async ({ request }) => {
@@ -119,6 +131,26 @@ test.describe('Invoice Trust Ledger — API business rules', () => {
     expect(again.status()).toBe(409); // only REGISTERED can be approved
   });
 
+  test('RULE — a lender may decline; it never blocks other lenders', async ({ request }) => {
+    const r = await request.post(`/invoices/${invoiceId}/decline`, {
+      headers: auth(t.otherbank),
+      data: { reason: 'Outside risk appetite' },
+    });
+    expect(r.status()).toBe(200);
+    const inv = await r.json();
+    expect(inv.status, 'a decline does NOT change status').toBe('APPROVED');
+    expect(inv.declines).toHaveLength(1);
+    expect(inv.declines[0].by).toBe('OtherBank NBFC'); // own decline: unmasked
+    expect(inv.declines[0].reason).toBe('Outside risk appetite');
+
+    const again = await request.post(`/invoices/${invoiceId}/decline`, {
+      headers: auth(t.otherbank),
+      data: { reason: 'twice' },
+    });
+    expect(again.status(), 'same lender cannot decline twice').toBe(409);
+    expect((await again.json()).error).toMatch(/already declined/i);
+  });
+
   test('STEP 5 — Lloyds funds: FINANCED with lender + timestamp', async ({ request }) => {
     const r = await request.post(`/invoices/${invoiceId}/fund`, { headers: auth(t.lloyds) });
     expect(r.status()).toBe(200);
@@ -128,15 +160,32 @@ test.describe('Invoice Trust Ledger — API business rules', () => {
     expect(inv.financedAt).toBeTruthy();
   });
 
-  test('THE KILL SHOT — second lender is BLOCKED by the chaincode', async ({ request }) => {
+  test('THE KILL SHOT — second lender is BLOCKED, competitor name masked', async ({ request }) => {
     const r = await request.post(`/invoices/${invoiceId}/fund`, { headers: auth(t.otherbank) });
     expect(r.status()).toBe(409);
     const { error } = await r.json();
     expect(error).toMatch(/DUPLICATE FINANCING BLOCKED/i);
-    expect(error).toMatch(/already financed by Lloyds Bank/i);
+    expect(error).toMatch(/another financial institution/i);
+    expect(error, 'losing lender must never learn WHO financed it').not.toMatch(/Lloyds/);
     // Idempotent: the rejection repeats forever, for anyone.
     const again = await request.post(`/invoices/${invoiceId}/fund`, { headers: auth(t.lloyds) });
     expect(again.status()).toBe(409);
+  });
+
+  test('LENDER ANONYMITY — reads and history never name a competitor', async ({ request }) => {
+    const asOther = await (await request.get(`/invoices/${invoiceId}`, { headers: auth(t.otherbank) })).json();
+    expect(asOther.financedBy).toBe('another financial institution');
+
+    const asLloyds = await (await request.get(`/invoices/${invoiceId}`, { headers: auth(t.lloyds) })).json();
+    expect(asLloyds.financedBy).toBe('Lloyds Bank');            // own name intact
+    expect(asLloyds.declines[0].by).toBe('another financial institution');
+    expect(asLloyds.declines[0].reason, 'foreign decline reasons stripped').toBeUndefined();
+
+    const asPayer = await (await request.get(`/invoices/${invoiceId}`, { headers: auth(t.payer) })).json();
+    expect(asPayer.financedBy, 'payer must know whom to settle with').toBe('Lloyds Bank');
+
+    const hist = await (await request.get(`/invoices/${invoiceId}/history`, { headers: auth(t.otherbank) })).json();
+    expect(JSON.stringify(hist), 'audit trail must not leak the competitor').not.toContain('Lloyds');
   });
 
   test('AUDIT TRAIL — immutable history: REGISTERED → APPROVED → FINANCED', async ({ request }) => {
@@ -150,18 +199,17 @@ test.describe('Invoice Trust Ledger — API business rules', () => {
     expect(statuses).toContain('APPROVED');
     expect(statuses).toContain('FINANCED');
     for (const h of history) {
-      expect(h.txId, 'every history entry carries a transaction id').toMatch(/^(mock-)?[0-9a-f]+$/i);
+      expect(h.txId, 'every history entry carries a transaction id').toMatch(/^(tx-|mock-)?[0-9a-f]+$/i);
       expect(h.timestamp).toBeTruthy();
     }
   });
 
-  test('RBAC MASKING — payer: last-4 bank only, no risk/tamper fields', async ({ request }) => {
+  test('RBAC MASKING — payer: last-4 bank only, no risk data', async ({ request }) => {
     const r = await request.get(`/invoices/${invoiceId}`, { headers: auth(t.payer) });
     const inv = await r.json();
     expect(inv.supplierProfile.bankAccount).toBe('••••9876');
     expect(inv.supplierProfile.sortCode).toBe('••-••-••');
     expect(inv.risk).toBeUndefined();          // lender underwriting data — hidden from payer
-    expect(inv.tamperWarning).toBeUndefined(); // lender-facing signal — hidden from payer
     expect(JSON.stringify(inv)).not.toContain('004512349876');
   });
 

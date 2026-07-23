@@ -21,9 +21,15 @@ api/         Express + JWT + role masking + Gemini OCR + risk scoring
   errors.js        ApiError + central error middleware — every error is { error, code }
   validate.js      request-shape validation for writes (400 + field messages)
 portal/      React (Vite) — Supplier / Payer / Lender consoles + audit trail
+e2e/         Playwright suite — API-contract regression + UI video/screenshot evidence
+  fixtures/        the real demo PDFs (clean + tampered twins) the tests upload
+  evidence/        captured proof from the last clean run; INDEX.md explains each file
 docs/        RULES.md (portable contract spec) · ARCHITECTURE.md (layers + request flow)
              DEMO_SCRIPT.md · JUDGE_QA.md · test-invoices/
 ```
+
+`RUNBOOK.md` exists byte-identical at the repo root AND in `docs/` — edit both or neither
+(known cleanup item, noted at the top of the file itself).
 
 ## Common commands
 
@@ -31,7 +37,7 @@ docs/        RULES.md (portable contract spec) · ARCHITECTURE.md (layers + requ
 # API (from api/)
 cp .env.example .env && npm install   # then set a real JWT_SECRET in .env (see comment there)
 node server.js                 # start on :3000, leave running
-bash test-flow.sh               # conformance suite — must print "13 passed, 0 failed"
+bash test-flow.sh               # conformance suite — must print "22 passed, 0 failed"
 bash regression.sh              # test-flow PLUS hardening checks (401/400/403, upload limits)
 node seed.js                    # demo data: one FINANCED invoice, one APPROVED-and-ready invoice
 rm -rf data                     # reset mock-mode ledger state (stop server first)
@@ -43,6 +49,16 @@ npm run build
 
 # Chaincode (from chaincode/) — only relevant once the Fabric test network is deployed
 # see docs/RUNBOOK.md Day 2 for network.sh / deployCC commands
+
+# E2E (from e2e/) — needs API on :3000 AND portal on :5173 already running;
+# global-setup.ts checks both (plus PDF fixtures) and fails fast with instructions.
+export LD_LIBRARY_PATH=~/.local/chrome-deps/extracted/usr/lib/x86_64-linux-gnu
+                                # ^ REQUIRED on this machine before EVERY Playwright run
+                                #   (rootless Chromium deps — no sudo on this box)
+npm test                        # all 19 tests (14 API + 1 UI lifecycle + 4 real-document)
+npm run test:api                # API-contract project only — no browser, no Gemini calls
+npm run test:ui                 # UI evidence projects — records video, calls Gemini
+npm run report                  # open the HTML report from the last run
 ```
 
 ## Morning ritual — fabric mode from cold
@@ -87,13 +103,29 @@ Mock mode instead: skip step 1 entirely, set `LEDGER_MODE=mock`, and `rm -rf api
 Fabric state does NOT persist across `network.sh down` — the ledger is wiped, so re-run
 `seed.js` every time. Mock mode persists in `api/data/ledger.json` until you delete it.
 
-There is no separate unit test framework — `api/test-flow.sh` (curl against a running server) is
-the conformance test for the whole system, and it must pass identically against every ledger
-backend. There's no single-test-runner concept; it's one linear script of 13 checks against a
-live server instance. `api/regression.sh` wraps it and adds API-hardening checks (wrong password
-→ 401, missing fields → 400 with field messages, garbage token → 401, wrong role → 403,
-oversized/wrong-type uploads rejected). Run regression.sh after any change to `api/*.js` or
-`chaincode/lib/invoiceContract.js`.
+## Testing
+
+There is no unit test framework. Two layers exist, both run against a live server:
+
+1. `api/test-flow.sh` (curl) is the conformance test for the whole system, and it must pass
+   identically against every ledger backend. It's one linear script of 22 checks. `api/regression.sh`
+   wraps it and adds API-hardening checks (wrong password → 401, missing fields → 400 with field
+   messages, garbage token → 401, wrong role → 403, oversized/wrong-type uploads rejected). Run
+   regression.sh after any change to `api/*.js` or `chaincode/lib/invoiceContract.js`.
+2. `e2e/` is a Playwright suite (see Common commands for the LD_LIBRARY_PATH prerequisite) with
+   two projects: `api-regression` asserts every business rule at the HTTP contract level with
+   fresh per-run invoice numbers (no browser, no Gemini), and `ui-evidence`
+   (`invoice-lifecycle.spec.ts` + `real-documents.spec.ts`) drives the portal to capture
+   video/screenshot proof of the full flow including the kill shot. Works in mock or fabric mode.
+   Things to preserve when touching it:
+   - **Gemini free-tier quota is 10 req/min** — the UI specs make up to ~5 `/ai/extract` calls
+     per run; never loop them rapidly. The API project deliberately makes zero.
+   - The real-document specs are **state-tolerant**: they check ledger state via API first and
+     branch, so they stay green whether the ledger is fresh or already contains the demo
+     invoices. Keep that property.
+   - `retries: 0` and serial workers are intentional (evidence runs must not silently retry);
+     the UI specs override the fixture PDFs' invoice numbers with unique per-run values before
+     registering, because the chaincode permanently blocks fingerprint reuse.
 
 ## Deployment (Render, single service)
 
@@ -131,12 +163,15 @@ yet implementable — GCUL has no public access); it exists to show the migratio
 file.
 
 Key invariants enforced identically by both real backends (see `docs/RULES.md` for full detail):
-- **Fingerprint** (SHA-256 of invoiceNumber+supplierVRN+amount) can register only once — exact
-  duplicates are rejected (`DUPLICATE REGISTRATION BLOCKED`).
-- Same invoiceNumber+supplierVRN with a *different* amount is allowed to register but is
-  permanently stamped with a `tamperWarning`.
+- **One number, one registration**: an invoice number can register only once per
+  supplier (the `NUM_` key of invoiceNumber+supplierVRN), regardless of amount — any reuse is
+  rejected (`DUPLICATE INVOICE BLOCKED`), with `Possible tampered or fake invoice.` appended when
+  the amounts differ. The `fingerprint` field (number+supplier+amount) is still stored as
+  provenance but no longer drives duplicate detection.
 - State machine: `REGISTERED → APPROVED → FINANCED → SETTLED`, with a `DISPUTED` terminal branch
   off `REGISTERED`. Transitions are guarded by current status, not by caller identity.
+- A lender can `DeclineInvoice` an APPROVED invoice (recorded in the `declines` array, once per
+  lender); a decline never changes `status` and never blocks other lenders from funding.
 - A `FINANCED` invoice can never be financed again (`DUPLICATE FINANCING BLOCKED`) — this holds
   at the ledger level even if the API's role checks were bypassed.
 - Timestamps inside contract/ledger logic come from the transaction context, never wall-clock, so
@@ -159,11 +194,16 @@ demo path ("Plan B") if the Fabric network can't be stood up.
   messages, don't rewrite them). Request validation for registers lives in `api/validate.js` —
   it's a shape check only; business rules stay in the ledger.
 - `api/masking.js` — field-level RBAC applied to every read response: payer never sees `risk` or
-  `tamperWarning` or full bank details; lender sees risk/funding data but KYC/bank stay masked to
-  last-4; supplier sees their own record unmasked. Route handlers always pipe reads through
-  `maskForRole(riskScore(inv), profile, req.user.role)` — do the same for any new read endpoint.
+  full bank details; lender sees risk/funding data but KYC/bank stay masked to last-4; supplier
+  sees their own record unmasked. One lender never sees another lender's name: for a lender
+  viewer, a competitor's `financedBy` and foreign `declines` entries become
+  `another financial institution` (reasons stripped) — including inside `GET /invoices/:id/history`
+  (via `maskHistoryForRole`) and the fund route's 409 message. Route handlers always pipe reads
+  through `maskForRole(riskScore(inv), profile, req.user.role, req.user.displayName)` — do the
+  same for any new read endpoint. The chaincode never masks; the on-chain record stays complete.
 - `api/risk.js` — deliberately rule-based (not ML) risk scoring so every point is explainable from
-  ledger state (payer approval, tamper flag, anchored doc hash, due-date window, amount band).
+  ledger state (payer approval +40, anchored doc hash +20, due-date window +15, amount band +15,
+  no lender declines +10).
 - `api/gemini.js` — OCR extraction for invoice uploads via Gemini REST API. Falls back to a
   labelled `simulated: true` response when `GEMINI_API_KEY` is unset or the API fails, so the demo
   never hard-fails on a missing key or dead network.

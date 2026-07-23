@@ -16,23 +16,33 @@ import * as crypto from 'crypto';
  *       registered under a unique number. PLUS: cryptographic proof that
  *       the on-chain docHash === sha256 of the uploaded file.
  *
- *   R2. DUPLICATE REGISTRATION BLOCKED — upload invoice-clean-INV-2026-007
+ *   R2. DUPLICATE INVOICE BLOCKED — upload invoice-clean-INV-2026-007
  *       and register it UNCHANGED. Whatever the ledger's prior state, this
  *       test always ends at the same place: the ledger refusing a second
- *       identical registration, on screen.
+ *       registration of the number, on screen.
  *
  *   R3. TAMPERED RESUBMISSION — upload the TAMPERED twin (same number,
- *       ₹7,50,000). The ledger accepts it but stamps a permanent
- *       tamperWarning, and the lender console shows the ⚠ flag.
+ *       ₹7,50,000). The invoice number is single-use per supplier, so the
+ *       resubmission is REJECTED at registration ("DUPLICATE INVOICE
+ *       BLOCKED … Possible tampered or fake invoice.") and the lender
+ *       never sees a ₹7,50,000 row for the number.
  *
- * STATE-TOLERANT DESIGN: R2/R3 check the ledger via API *before* acting and
- * branch: fresh ledger -> register succeeds first, then the duplicate attempt
- * is blocked; already-populated ledger (e.g. this morning's manual testing,
- * or a previous run of this suite) -> the very first attempt is blocked.
- * Both branches capture the same evidence. The suite is green forever.
+ *   R4. SIMILAR-INVOICE FLAG — the workaround for R2/R3 is re-registering
+ *       the SAME PDF under a NEW invoice number. That registers (different
+ *       numbers are never blocked — recurring billing is legitimate), but
+ *       the read-time document-hash match flags it: −25 risk points, the
+ *       twin number named in the reasons, and the ⚠ similar chip on the
+ *       lender row.
  *
- * GEMINI QUOTA: up to 4 /ai/extract calls in this file (007 once or twice,
- * tampered once, 014 once). Free tier = 10/min. Do not loop this spec.
+ * STATE-TOLERANT DESIGN: R2 checks the ledger via API *before* acting and
+ * branches: number absent -> register succeeds first, then the duplicate
+ * attempt is blocked; number already present (any amount — e.g. a previous
+ * run of this suite) -> the very first attempt is blocked. Both branches
+ * capture the same evidence. The suite is green forever.
+ *
+ * GEMINI QUOTA: up to 6 /ai/extract calls in this file (007 once or twice,
+ * tampered once, 014 three times — R1 plus both R4 uploads). Free tier =
+ * 10/min. Do not loop this spec.
  * ============================================================================
  */
 
@@ -96,12 +106,12 @@ function armDialogCapture(page: Page): { last: () => string } {
 
 async function expectDuplicateBlocked(page: Page, dialogs: { last: () => string }) {
   // [ADAPT] generated SupplierView shows "the server's error message" on failure.
-  const onScreen = page.getByText(/DUPLICATE REGISTRATION BLOCKED/i).first();
+  const onScreen = page.getByText(/DUPLICATE INVOICE BLOCKED/i).first();
   try {
     await expect(onScreen).toBeVisible({ timeout: 20_000 });
   } catch {
     expect(dialogs.last(), 'rejection should surface as text or alert dialog')
-      .toMatch(/DUPLICATE REGISTRATION BLOCKED/i);
+      .toMatch(/DUPLICATE INVOICE BLOCKED/i);
   }
 }
 
@@ -128,6 +138,16 @@ async function ledgerFind(invoiceNumber: string, amount: number) {
   }).then((x) => x.json());
   if (!Array.isArray(all)) { cachedToken = null; return []; } // bad/expired token: retry next poll
   return all.filter((i) => i.invoiceNumber === invoiceNumber && Number(i.amount) === amount);
+}
+
+// Any registration of the number, regardless of amount — the uniqueness key.
+async function ledgerFindByNumber(invoiceNumber: string) {
+  const token = await lenderToken();
+  const all: any[] = await fetch('http://localhost:3000/invoices', {
+    headers: { Authorization: `Bearer ${token}` },
+  }).then((x) => x.json());
+  if (!Array.isArray(all)) { cachedToken = null; return []; }
+  return all.filter((i) => i.invoiceNumber === invoiceNumber);
 }
 
 async function uploadAndAwaitOcr(page: Page, pdf: string, expectNo: RegExp, expectAmt: RegExp) {
@@ -173,10 +193,11 @@ test.describe('Real-document scenarios (fixture PDFs, as-is)', () => {
       `  docHash on-chain (${inv.invoiceId}) = ${inv.docHash}\n  MATCH: YES\n\n`);
   });
 
-  test('R2 — the real INV-2026-007 PDF: duplicate registration BLOCKED by the ledger', async ({ page }) => {
+  test('R2 — the real INV-2026-007 PDF: duplicate invoice number BLOCKED by the ledger', async ({ page }) => {
     const dialogs = armDialogCapture(page);
     const fileHash = sha256(PDF_007);
-    const preExisting = (await ledgerFind('INV-2026-007', 500000)).length > 0;
+    // Any prior amount blocks: uniqueness keys on the NUMBER, not the fingerprint.
+    const preExisting = (await ledgerFindByNumber('INV-2026-007')).length > 0;
 
     await loginAs(page, /supplier|sri lakshmi/i);
     await uploadAndAwaitOcr(page, PDF_007, /INV-2026-007/i, /500000|5,?00,?000/);
@@ -198,11 +219,11 @@ test.describe('Real-document scenarios (fixture PDFs, as-is)', () => {
       await page.getByRole('button', { name: /register/i }).click();
       await expectDuplicateBlocked(page, dialogs);
     }
-    await shot(page, 'duplicate-registration-blocked-real-pdf');
+    await shot(page, 'duplicate-invoice-blocked-real-pdf');
 
-    // The rule held: exactly ONE such invoice exists, ever.
-    const matches = await ledgerFind('INV-2026-007', 500000);
-    expect(matches.length, 'fingerprint uniqueness must hold').toBe(1);
+    // The rule held: exactly ONE registration of this number exists, ever.
+    const matches = await ledgerFindByNumber('INV-2026-007');
+    expect(matches.length, 'an invoice number registers at most once per supplier').toBe(1);
 
     // Hash proof (strict when this run created it; informational if pre-existing,
     // since an earlier manual registration may have attached no/another file).
@@ -213,44 +234,81 @@ test.describe('Real-document scenarios (fixture PDFs, as-is)', () => {
     if (!preExisting) expect(matches[0].docHash).toBe(fileHash);
   });
 
-  test('R3 — the TAMPERED twin (₹7.5L, same number): permanent tamper flag for lenders', async ({ page }) => {
+  test('R3 — the TAMPERED twin (₹7.5L, same number): REJECTED at registration', async ({ page }) => {
     const dialogs = armDialogCapture(page);
-    const preExisting = (await ledgerFind('INV-2026-007', 750000)).length > 0;
+    // Serial mode: R2 has just guaranteed the number is on the ledger.
+    const before = await ledgerFindByNumber('INV-2026-007');
+    expect(before.length, 'R2 must have left INV-2026-007 on the ledger').toBeGreaterThan(0);
 
     await loginAs(page, /supplier|sri lakshmi/i);
     await uploadAndAwaitOcr(page, PDF_TAMPERED, /INV-2026-007/i, /750000|7,?50,?000/);
     await shot(page, 'tampered-pdf-ocr-inflated-amount');
     await page.getByRole('button', { name: /register/i }).click();
 
-    if (preExisting) {
-      // A prior run already registered the tampered version -> duplicate block,
-      // which is itself the rule working. The tamper flag below still verifies.
-      await expectDuplicateBlocked(page, dialogs);
-    } else {
-      await expect
-        .poll(async () => (await ledgerFind('INV-2026-007', 750000)).length, { timeout: 30_000 })
-        .toBe(1);
+    // The single-use rule fires: the tampered resubmission never lands.
+    await expectDuplicateBlocked(page, dialogs);
+    if (Number(before[0].amount) !== 750000) {
+      await expect(page.getByText(/Possible tampered or fake invoice/i).first()).toBeVisible();
     }
+    await shot(page, 'supplier-tampered-resubmission-blocked');
 
-    // The permanent, on-ledger warning — regardless of which branch ran.
-    const [tampered] = await ledgerFind('INV-2026-007', 750000);
-    expect(tampered.tamperWarning, 'ledger must carry the altered-resubmission warning')
-      .toMatch(/previously registered/i);
-    expect(tampered.tamperWarning).toMatch(/500000/);
+    // Ledger unchanged: no new registration of this number was created.
+    expect((await ledgerFindByNumber('INV-2026-007')).length).toBe(before.length);
 
-    // And the lender sees it: the ₹7,50,000 row for INV-2026-007 carries the flag.
+    // The lender never even sees a ₹7,50,000 row for the number ("All" shows
+    // every invoice, including those financed by others).
     await logout(page);
     await loginAs(page, /lloyds/i);
-    const tamperedRow = page.locator('tr')
+    await page.getByRole('button', { name: /^All \(/ }).click();
+    await expect(page.locator('tr').filter({ hasText: 'INV-2026-007' }).first())
+      .toBeVisible({ timeout: 15_000 });
+    await expect(page.locator('tr')
       .filter({ hasText: 'INV-2026-007' })
-      .filter({ hasText: /7,?50,?000/ })
-      .first();
-    await expect(tamperedRow).toBeVisible({ timeout: 15_000 });
-    // div.tamper is the visible "⚠ tamper flag" badge; the collapsed risk
-    // <details> also contains the words "tamper flag", hidden — scope precisely.
-    await expect(tamperedRow.locator('div.tamper'),
-      'lender console must surface the tamper warning').toBeVisible();
+      .filter({ hasText: /7,?50,?000/ })).toHaveCount(0);
 
-    await shot(page, 'lender-tamper-flag-real-tampered-pdf');
+    await shot(page, 'lender-sees-no-tampered-row');
+  });
+
+  test('R4 — SAME PDF under a NEW number: registers, but flagged as similar', async ({ page }) => {
+    const twinA = `INV-014-TWIN-${RUN}-A`;
+    const twinB = `INV-014-TWIN-${RUN}-B`;
+
+    // First upload of the document under a fresh number — registers fine.
+    await loginAs(page, /supplier|sri lakshmi/i);
+    await uploadAndAwaitOcr(page, PDF_014, /INV-2026-014/i, /325000|3,?25,?000/);
+    await field(page, /invoice ?number/i, 'invoiceNumber').fill(twinA);
+    await page.getByRole('button', { name: /register/i }).click();
+    await expect
+      .poll(async () => (await ledgerFindByNumber(twinA)).length, { timeout: 30_000 })
+      .toBe(1);
+
+    // Second upload of the IDENTICAL PDF under another fresh number. The
+    // number rule cannot fire (new number) — the similarity flag is the net.
+    await page.reload();
+    await loginAs(page, /supplier|sri lakshmi/i);
+    await uploadAndAwaitOcr(page, PDF_014, /INV-2026-014/i, /325000|3,?25,?000/);
+    await field(page, /invoice ?number/i, 'invoiceNumber').fill(twinB);
+    await page.getByRole('button', { name: /register/i }).click();
+    await expect
+      .poll(async () => (await ledgerFindByNumber(twinB)).length, { timeout: 30_000 })
+      .toBe(1);
+    await shot(page, 'same-pdf-new-number-registered');
+
+    // API truth: strong flag present, −25 applied, twin named in the reasons.
+    const [twin] = await ledgerFindByNumber(twinB);
+    expect(twin.risk.similar?.sameDocument, 'document-hash match must name the twin')
+      .toContain(twinA);
+    expect(twin.risk.reasons.join(' | ')).toMatch(/Same document already registered .* re-numbered resubmission \(−25\)/);
+
+    // Lender console: the amber ⚠ similar chip on the flagged row.
+    await logout(page);
+    await loginAs(page, /lloyds/i);
+    await page.getByRole('button', { name: /^All \(/ }).click();
+    const row = page.locator('tr').filter({ hasText: twinB }).first();
+    await expect(row).toBeVisible({ timeout: 15_000 });
+    await expect(row.locator('div.similar'), 'flagged row must carry the ⚠ similar chip')
+      .toBeVisible();
+
+    await shot(page, 'lender-similar-flag-same-document');
   });
 });

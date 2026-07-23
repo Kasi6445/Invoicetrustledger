@@ -101,8 +101,7 @@ export default function SupplierView({ me }) {
               <tr key={inv.invoiceId}>
                 <td>{inv.invoiceNumber}<div className="sub">{inv.invoiceId}</div></td>
                 <td className="amount">{inv.currency} {Number(inv.amount).toLocaleString('en-IN')}</td>
-                <td><span className={`badge ${inv.status}`}>{inv.status}</span>
-                  {inv.tamperWarning && <div className="tamper">⚠ tamper flag</div>}</td>
+                <td><span className={`badge ${inv.status}`}>{inv.status}</span></td>
                 <td className="sub">{new Date(inv.registeredAt).toLocaleString()}</td>
                 <td><button className="btn" disabled={busy}
                             onClick={async () => { try { setTrail(await getHistory(inv.invoiceId)); } catch {} }}>Audit trail</button></td>

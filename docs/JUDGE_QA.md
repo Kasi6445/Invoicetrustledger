@@ -19,10 +19,13 @@ Banks need permissioned membership, data privacy, and predictable costs with no 
 Recompute the file's SHA-256 and compare it with the on-chain `docHash` — a one-line check. The document lives off-chain; only its fingerprint is on the ledger.
 
 **"What if the supplier edits the amount and resubmits?"**
-Same invoice number + supplier with a different amount registers but is stamped with a permanent tamper flag naming both amounts — you saw it appear live, and it drags the risk grade down.
+It never gets on the ledger: an invoice number is single-use per supplier, so the resubmission is rejected at registration with DUPLICATE INVOICE BLOCKED naming both amounts — and, because the amounts differ, flagged as a possible tampered or fake invoice. You saw the red banner live.
+
+**"You block number reuse; what stops a fraudster from just changing the number?"**
+Document-hash matching flags the identical PDF instantly; supplier+payer+amount similarity flags re-keyed copies; the flag degrades the risk grade and the lender declines with a reason recorded on-chain — detection in the system, decision with the institution.
 
 **"Is the risk score AI?"**
-Deliberately not a black box: it's rule-based and every point is derived from the ledger (payer approval, tamper flag, anchored document, due-date window, amount band) — expand any grade and read the reasons. The AI in the system is the Gemini document extraction.
+Deliberately not a black box: it's rule-based and every point is derived from the ledger (payer approval, anchored document, due-date window, amount band, lender declines) — expand any grade and read the reasons. The AI in the system is the Gemini document extraction.
 
 **"What's mocked?"**
 Honestly scoped: cloud deployment (runs locally in Docker — cloud-deployable), ERP/core-banking/UPI/KYC integrations (stubbed), and OAuth2/OIDC (simple JWT logins — OIDC-ready). The ledger, the contract rules, the role masking and the AI extraction are real.

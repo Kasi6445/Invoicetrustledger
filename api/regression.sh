@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Full regression: the 13 business-flow checks (test-flow.sh) PLUS API-hardening
+# Full regression: the 22 business-flow checks (test-flow.sh) PLUS API-hardening
 # checks. Server must be running. Usage: bash regression.sh
 API=http://localhost:3000
 DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -70,5 +70,5 @@ CODE=$(curl -s -o /tmp/itl_body -w "%{http_code}" $API/invoices -H "Authorizatio
 rm -f /tmp/itl_big.pdf /tmp/itl_bad.txt /tmp/itl_body
 
 echo "———————————————"
-echo "HARDENING RESULT: $PASS passed, $FAIL failed (plus 13/13 baseline above)"
+echo "HARDENING RESULT: $PASS passed, $FAIL failed (plus 22/22 baseline above)"
 [ $FAIL -eq 0 ]

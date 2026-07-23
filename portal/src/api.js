@@ -61,6 +61,7 @@ export const getHistory     = id => client.get(`/invoices/${id}/history`).then(r
 export const approveInvoice = id => client.post(`/invoices/${id}/approve`, {}).then(r => r.data);
 export const disputeInvoice = (id, reason) => client.post(`/invoices/${id}/dispute`, { reason }).then(r => r.data);
 export const fundInvoice    = id => client.post(`/invoices/${id}/fund`, {}).then(r => r.data);
+export const declineInvoice = (id, reason) => client.post(`/invoices/${id}/decline`, { reason }).then(r => r.data);
 export const verifyLedger   = () => client.get('/ledger/verify').then(r => r.data);
 
 export function registerInvoice(fields, file) {

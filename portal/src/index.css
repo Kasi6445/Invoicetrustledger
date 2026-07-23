@@ -104,7 +104,7 @@ tr:hover td { background: #fafcfb; }
 
 .grade { font-weight: 700; }
 .grade.A { color: var(--ok); } .grade.B { color: var(--amber); } .grade.C { color: var(--red); }
-.tamper { color: var(--red); font-size: 12px; font-weight: 600; }
+.similar { color: var(--amber); font-size: 12px; font-weight: 600; }
 
 /* buttons */
 .btn {

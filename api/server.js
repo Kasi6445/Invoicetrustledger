@@ -13,7 +13,7 @@ const path = require('path');
 
 const users = require('./users');
 const { getLedger } = require('./ledger');          // <— the swap seam (mock | fabric | gcul)
-const { maskForRole } = require('./masking');
+const { maskForRole, maskHistoryForRole } = require('./masking');
 const offchain = require('./offchain');
 const { riskScore } = require('./risk');
 const { extractInvoice } = require('./gemini');
@@ -110,12 +110,43 @@ app.post('/invoices/:id/dispute', auth('payer'), async (req, res, next) => {
     } catch (e) { next(new ApiError(409, 'LEDGER_REJECTED', e.message)); }
 });
 
+/* ---- STEP 3b: lender declines (their own credit decision — never blocks others) ---- */
+app.post('/invoices/:id/decline', auth('lender'), async (req, res, next) => {
+    try {
+        const reason = (req.body && req.body.reason) || 'Not specified';
+        const ledger = await getLedger();
+        const inv = JSON.parse(await ledger.submit('DeclineInvoice', req.params.id, req.user.displayName, reason));
+        const all = JSON.parse(await ledger.evaluate('GetAllInvoices'));
+        const db = offchain.load();
+        res.json(maskForRole(riskScore(inv, all), db.supplierProfiles[inv.supplierVRN], req.user.role, req.user.displayName));
+    } catch (e) { next(new ApiError(409, 'LEDGER_REJECTED', e.message)); }
+});
+
 /* ---- STEP 4+5: lender funds — THE endpoint that gets blocked in the demo ---- */
 app.post('/invoices/:id/fund', auth('lender'), async (req, res, next) => {
     try {
         const ledger = await getLedger();
         res.json(JSON.parse(await ledger.submit('FundInvoice', req.params.id, req.user.displayName)));
-    } catch (e) { next(new ApiError(409, 'LEDGER_REJECTED', e.message)); }   // the chaincode's rejection travels to the UI
+    } catch (e) {
+        // The chaincode's rejection travels to the UI — but its message names
+        // the financing lender, which must never reach a competing lender.
+        let msg = e.message;
+        if (msg.includes('DUPLICATE FINANCING BLOCKED')) {
+            try {
+                const ledger = await getLedger();
+                const inv = JSON.parse(await ledger.evaluate('ReadInvoice', req.params.id));
+                if (inv.financedBy && inv.financedBy !== req.user.displayName) {
+                    msg = `DUPLICATE FINANCING BLOCKED: this invoice has already been financed ` +
+                          `by another financial institution at ${inv.financedAt}. ` +
+                          `The ledger rejects this transaction.`;
+                }
+            } catch {
+                // read failed — strip the name from the original message instead
+                msg = msg.replace(/financed by .+? at /, 'financed by another financial institution at ');
+            }
+        }
+        next(new ApiError(409, 'LEDGER_REJECTED', msg));
+    }
 });
 
 /* ---- reads, masked per role ---- */
@@ -125,7 +156,7 @@ app.get('/invoices', auth(), async (req, res, next) => {
         const all = JSON.parse(await ledger.evaluate('GetAllInvoices'));
         const db = offchain.load();
         res.json(all.map(inv =>
-            maskForRole(riskScore(inv), db.supplierProfiles[inv.supplierVRN], req.user.role)));
+            maskForRole(riskScore(inv, all), db.supplierProfiles[inv.supplierVRN], req.user.role, req.user.displayName)));
     } catch (e) { next(e); }
 });
 
@@ -133,8 +164,10 @@ app.get('/invoices/:id', auth(), async (req, res, next) => {
     try {
         const ledger = await getLedger();
         const inv = JSON.parse(await ledger.evaluate('ReadInvoice', req.params.id));
+        // Similarity flags need the whole list — fine at prototype scale.
+        const all = JSON.parse(await ledger.evaluate('GetAllInvoices'));
         const db = offchain.load();
-        res.json(maskForRole(riskScore(inv), db.supplierProfiles[inv.supplierVRN], req.user.role));
+        res.json(maskForRole(riskScore(inv, all), db.supplierProfiles[inv.supplierVRN], req.user.role, req.user.displayName));
     } catch (e) { next(new ApiError(404, 'NOT_FOUND', e.message)); }
 });
 
@@ -142,7 +175,10 @@ app.get('/invoices/:id', auth(), async (req, res, next) => {
 app.get('/invoices/:id/history', auth(), async (req, res, next) => {
     try {
         const ledger = await getLedger();
-        res.json(JSON.parse(await ledger.evaluate('GetInvoiceHistory', req.params.id)));
+        const history = JSON.parse(await ledger.evaluate('GetInvoiceHistory', req.params.id));
+        // Chain history carries full record snapshots — mask competitor lender
+        // names for lender viewers, same rule as single-invoice reads.
+        res.json(maskHistoryForRole(history, req.user.role, req.user.displayName));
     } catch (e) { next(e); }
 });
 

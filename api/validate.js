@@ -1,7 +1,7 @@
 'use strict';
 // Request-shape validation for write endpoints. This layer rejects malformed
 // input early with field-level messages; the LEDGER remains the sole enforcer
-// of business rules (duplicates, state machine, tamper flags — docs/RULES.md).
+// of business rules (duplicates, state machine, declines — docs/RULES.md).
 const { ApiError } = require('./errors');
 
 function validateRegister(req, res, next) {

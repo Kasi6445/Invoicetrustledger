@@ -42,13 +42,14 @@ function entryHash(prevHash, core) {
 module.exports = function mockLedger() {
     const chain = loadChain();            // [{seq, prevHash, hash, txId, timestamp, fn, args}]
     const store = new Map();              // invoiceId -> current invoice record
-    const fps = new Map();                // fingerprint -> invoiceId
-    const nums = new Map();               // numberKey -> { invoiceId, amount }
+    const nums = new Map();               // numberKey -> { invoiceId, amount, registeredAt }
     const history = new Map();            // invoiceId -> [{txId, timestamp, record}]
 
     const pushHistory = (id, rec, txId, timestamp) => {
         if (!history.has(id)) history.set(id, []);
-        history.get(id).push({ txId, timestamp, record: { ...rec } });
+        // Deep copy: Fabric snapshots each version at write time, so nested
+        // fields (declines) must not stay live references into current state.
+        history.get(id).push({ txId, timestamp, record: JSON.parse(JSON.stringify(rec)) });
     };
 
     // ----- the rules (identical to chaincode) applied to in-memory state -----
@@ -59,24 +60,21 @@ module.exports = function mockLedger() {
 
             if (store.has(invoiceId)) throw new Error(`Invoice id ${invoiceId} already exists`);
 
+            // R1 "one number, one registration": ANY prior invoice with the same
+            // (invoiceNumber, supplierVRN) — same or different amount — is rejected.
+            // Uniqueness is scoped per supplier on purpose: two different suppliers
+            // may legitimately use the same invoice number.
             const fp = fingerprint(invoiceNumber, supplierVRN, amount);
-            if (fps.has(fp)) {
-                const priorId = fps.get(fp);
-                const prior = store.get(priorId);
-                throw new Error(
-                    `DUPLICATE REGISTRATION BLOCKED: invoice ${invoiceNumber} from supplier ` +
-                    `${supplierVRN} is already on the ledger as ${priorId} ` +
-                    `(registered ${prior ? prior.registeredAt : 'earlier'})`);
-            }
-
-            let tamperWarning = null;
             const nk = numberKey(invoiceNumber, supplierVRN);
             if (nums.has(nk)) {
                 const prev = nums.get(nk);
-                tamperWarning =
-                    `Invoice number ${invoiceNumber} from this supplier was previously registered ` +
-                    `with amount ${prev.amount}. This submission has amount ${Number(amount)}. ` +
-                    `Possible altered/resubmitted invoice.`;
+                let msg =
+                    `DUPLICATE INVOICE BLOCKED: invoice number ${invoiceNumber} has already been ` +
+                    `registered by supplier ${supplierVRN} (ledger record: ${prev.invoiceId}, ` +
+                    `amount ${prev.amount}, registered ${prev.registeredAt}). ` +
+                    `This submission has amount ${Number(amount)}. An invoice number cannot be reused.`;
+                if (Number(amount) !== Number(prev.amount)) msg += ' Possible tampered or fake invoice.';
+                throw new Error(msg);
             }
 
             const inv = {
@@ -86,11 +84,10 @@ module.exports = function mockLedger() {
                 status: 'REGISTERED', registeredAt: timestamp,
                 approvedAt: null, approvedBy: null,
                 financedAt: null, financedBy: null, settledAt: null,
-                fingerprint: fp, tamperWarning
+                fingerprint: fp
             };
             store.set(invoiceId, inv);
-            fps.set(fp, invoiceId);
-            if (!nums.has(nk)) nums.set(nk, { invoiceId, amount: Number(amount) });
+            nums.set(nk, { invoiceId, amount: Number(amount), registeredAt: timestamp });
             pushHistory(invoiceId, inv, txId, timestamp);
             return inv;
         }
@@ -108,6 +105,17 @@ module.exports = function mockLedger() {
                 throw new Error(`Cannot dispute: invoice is in status ${inv.status}`);
             inv.status = 'DISPUTED'; inv.approvedBy = args[1];
             inv.disputeReason = args[2]; inv.approvedAt = timestamp;
+
+        } else if (fn === 'DeclineInvoice') {
+            // A decline does NOT change status. The invoice remains APPROVED and any
+            // other lender can still fund it — one institution declining is its own
+            // credit decision, not a global block.
+            if (inv.status !== 'APPROVED')
+                throw new Error(`Cannot decline: invoice ${args[0]} is ${inv.status}; only APPROVED invoices can be declined`);
+            if ((inv.declines || []).some(d => d.by === args[1]))
+                throw new Error(`Cannot decline: ${args[1]} has already declined invoice ${args[0]}`);
+            if (!inv.declines) inv.declines = [];
+            inv.declines.push({ by: args[1], reason: args[2], at: timestamp });
 
         } else if (fn === 'FundInvoice') {
             if (inv.status === 'FINANCED')
