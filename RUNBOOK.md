@@ -142,12 +142,22 @@ Open the portal → audit trail → the tx ids are now genuine Fabric transactio
 
 ```bash
 # The morning ritual (memorise; also needed after any reboot):
+# 0. THE DEMO RUNS FROM THE `v3-similar-invoice-flag` BRANCH, *not* main.
+#    main is the pre-v2 code and does NOT have single-use invoice numbers,
+#    lender decline/anonymity, the similar-invoice flag, or any CR01 feature.
+#    Check every morning before anything else:
+cd ~/invoice-trust-ledger && git checkout v3-similar-invoice-flag && git status
 # fabric mode:
 cd ~/fabric/fabric-samples/test-network && ./network.sh down && ./network.sh up createChannel -c mychannel -ca && ./network.sh deployCC -ccn invoicecc -ccp ~/invoice-trust-ledger/chaincode -ccl javascript
-cd ~/invoice-trust-ledger/api && node server.js &
-sleep 2 && node seed.js
+# Start the API with restart.sh — it kills whatever holds :3000 by socket-owner
+# PID (never a name match), refuses to start on a busy port, and prints the
+# LEDGER_MODE it came up in. NEVER `node server.js &` by hand — a stale server
+# on the port serves old code silently.
+cd ~/invoice-trust-ledger/api && bash restart.sh    # <- confirm it prints LEDGER_MODE = fabric
+node seed.js
 cd ~/invoice-trust-ledger/portal && npm run dev
-# mock mode: skip the fabric lines, just rm -rf api/data first.
+# mock mode: skip the fabric lines; set LEDGER_MODE=mock in api/.env, rm -rf api/data, then restart.sh.
+# After editing api/*.js or the chaincode later, re-run `bash restart.sh` (not a bare node).
 ```
 
 1. Print both files in `docs/test-invoices/` to PDF (clean ₹5,00,000 + tampered ₹7,50,000). Keep on desktop.

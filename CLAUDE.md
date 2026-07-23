@@ -89,14 +89,22 @@ cd ~/fabric/fabric-samples/test-network
 docker ps --format 'table {{.Names}}\t{{.Status}}'
 # expect 8 containers: 2 peers + orderer + 3 CAs + 2 dev-peer chaincode containers
 
-# 2. API
-cd ~/invoice-trust-ledger/api        # .env: LEDGER_MODE=fabric, FABRIC_SAMPLES=/home/sandh/fabric/fabric-samples
-node server.js &
-sleep 2 && node seed.js
+# 2. API  — the demo runs from the `v3-similar-invoice-flag` branch, NOT main.
+cd ~/invoice-trust-ledger && git checkout v3-similar-invoice-flag
+cd api                               # .env: LEDGER_MODE=fabric, FABRIC_SAMPLES=/home/sandh/fabric/fabric-samples
+bash restart.sh                      # kills the :3000 socket-owner by PID, won't start on a busy
+                                     # port, prints LEDGER_MODE — never `node server.js &` by hand
+node seed.js
 
 # 3. Portal
 cd ~/invoice-trust-ledger/portal && npm run dev
 ```
+
+`api/restart.sh` is the ONLY sanctioned way to (re)start the API. It exists because
+`pkill/pgrep -f server.js` self-matches the calling shell, and starting on a busy port
+makes the new process EADDRINUSE while the stale one keeps serving old code silently —
+the script kills by the PID owning `:3000` (lsof/fuser/ss), polls until the port is
+confirmed free (loud non-zero exit if not), and prints the `LEDGER_MODE` it came up in.
 
 Mock mode instead: skip step 1 entirely, set `LEDGER_MODE=mock`, and `rm -rf api/data` first.
 
