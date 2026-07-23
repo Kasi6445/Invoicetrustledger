@@ -142,11 +142,12 @@ Open the portal → audit trail → the tx ids are now genuine Fabric transactio
 
 ```bash
 # The morning ritual (memorise; also needed after any reboot):
-# 0. THE DEMO RUNS FROM THE `v3-similar-invoice-flag` BRANCH, *not* main.
-#    main is the pre-v2 code and does NOT have single-use invoice numbers,
-#    lender decline/anonymity, the similar-invoice flag, or any CR01 feature.
+# 0. THE DEMO RUNS FROM THE `main` BRANCH. (The old `v3-similar-invoice-flag`
+#    branch was merged into main and no longer exists — main now carries the
+#    single-use invoice numbers, lender decline/anonymity, the similar-invoice
+#    flag, and every CR01 feature.)
 #    Check every morning before anything else:
-cd ~/invoice-trust-ledger && git checkout v3-similar-invoice-flag && git status
+cd ~/invoice-trust-ledger && git checkout main && git status
 # fabric mode:
 cd ~/fabric/fabric-samples/test-network && ./network.sh down && ./network.sh up createChannel -c mychannel -ca && ./network.sh deployCC -ccn invoicecc -ccp ~/invoice-trust-ledger/chaincode -ccl javascript
 # Start the API with restart.sh — it kills whatever holds :3000 by socket-owner

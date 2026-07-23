@@ -89,8 +89,8 @@ cd ~/fabric/fabric-samples/test-network
 docker ps --format 'table {{.Names}}\t{{.Status}}'
 # expect 8 containers: 2 peers + orderer + 3 CAs + 2 dev-peer chaincode containers
 
-# 2. API  — the demo runs from the `v3-similar-invoice-flag` branch, NOT main.
-cd ~/invoice-trust-ledger && git checkout v3-similar-invoice-flag
+# 2. API  — the demo runs from the `main` branch.
+cd ~/invoice-trust-ledger && git checkout main
 cd api                               # .env: LEDGER_MODE=fabric, FABRIC_SAMPLES=/home/sandh/fabric/fabric-samples
 bash restart.sh                      # kills the :3000 socket-owner by PID, won't start on a busy
                                      # port, prints LEDGER_MODE — never `node server.js &` by hand
