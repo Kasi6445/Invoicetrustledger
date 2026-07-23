@@ -116,6 +116,10 @@ tr:hover td { background: #fafcfb; }
 .btn.primary:hover { background: var(--deep); border-color: var(--deep); color: #fff; }
 .btn.danger { color: var(--red); }
 .btn.danger:hover { border-color: var(--red); }
+/* amber/secondary — the "attempt funding" button on an already-financed row:
+   deliberately still clickable (the ledger rejection is the demo climax). */
+.btn.amber { background: var(--amber-bg); border-color: #e3c489; color: var(--amber); font-weight: 600; }
+.btn.amber:hover { border-color: var(--amber); color: var(--amber); }
 .btn:disabled { opacity: .55; cursor: not-allowed; }
 
 /* forms */

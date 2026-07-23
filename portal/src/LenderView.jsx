@@ -110,7 +110,22 @@ export default function LenderView({ me }) {
             {invoices.length === 0 && <tr><td colSpan="7" className="sub">Ledger is empty — run the seed script or register an invoice as the supplier.</td></tr>}
             {invoices.length > 0 && visible.length === 0 &&
               <tr><td colSpan="7" className="sub">Nothing matches this tab{q ? ' and search' : ''} — try the All tab or clear the search.</td></tr>}
-            {visible.map(inv => (
+            {visible.map(inv => {
+              const mine = fundedByMe(inv);
+              // Fund button appearance is status-driven. It stays CLICKABLE on a
+              // FINANCED row viewed by a non-funder — that rejected click is the
+              // demo's climax — so it is never disabled there, only re-styled amber.
+              // The row never names the funding institution (matches the masked error).
+              let fundClass = 'btn primary', fundLabel = 'Fund invoice', fundDisabled = fundingId !== null;
+              if (inv.status === 'REGISTERED') { fundClass = 'btn'; fundLabel = 'Awaiting payer approval'; fundDisabled = true; }
+              else if (inv.status === 'FINANCED') {
+                if (mine) { fundClass = 'btn'; fundLabel = 'Financed by you'; fundDisabled = true; }
+                else { fundClass = 'btn amber'; fundLabel = 'Attempt funding'; }
+              }
+              else if (inv.status === 'SETTLED') { fundClass = 'btn'; fundLabel = 'Settled'; fundDisabled = true; }
+              else if (inv.status === 'DISPUTED') { fundClass = 'btn'; fundLabel = 'Disputed'; fundDisabled = true; }
+              if (fundingId === inv.invoiceId) fundLabel = 'Funding…';
+              return (
               <tr key={inv.invoiceId}>
                 <td>{inv.invoiceNumber}<div className="sub">{inv.invoiceId}</div></td>
                 <td>{inv.supplierName}
@@ -122,7 +137,11 @@ export default function LenderView({ me }) {
                         {inv.payerProfile.payerRating && <div className="sub">rating {inv.payerProfile.payerRating}</div>}</span>
                     : <span className="sub">—</span>}
                 </td>
-                <td><span className={`badge ${inv.status}`}>{inv.status}</span></td>
+                <td>
+                  <span className={`badge ${inv.status}`}>{inv.status}</span>
+                  {inv.status === 'FINANCED' &&
+                    <div className="sub" style={{ marginTop: 4 }}>Prior assignment recorded on ledger</div>}
+                </td>
                 <td>
                   {inv.risk && (
                     <details className="reasons">
@@ -136,17 +155,12 @@ export default function LenderView({ me }) {
                     <div className="similar" title="Similar invoice(s) on the ledger — expand the risk grade for details">⚠ similar</div>}
                 </td>
                 <td style={{ whiteSpace: 'nowrap' }}>
-                  {/* Fund stays CLICKABLE when another institution financed it —
-                      the demo climax is this click being rejected by the ledger.
-                      Only my own financing disables it. */}
-                  <button className="btn primary"
-                          disabled={fundingId !== null || fundedByMe(inv) || inv.status === 'SETTLED'}
-                          onClick={() => fund(inv.invoiceId)}>
-                    {fundingId === inv.invoiceId ? 'Funding…'
-                      : fundedByMe(inv) ? 'Financed by you' : 'Fund invoice'}
-                  </button>{' '}
-                  {inv.status === 'APPROVED' && (
-                    <><button className="btn danger" disabled={fundingId !== null}
+                  <button className={fundClass} disabled={fundDisabled}
+                          onClick={() => fund(inv.invoiceId)}>{fundLabel}</button>{' '}
+                  {(inv.status === 'APPROVED' || inv.status === 'REGISTERED') && (
+                    <><button className="btn danger"
+                              disabled={fundingId !== null || inv.status !== 'APPROVED'}
+                              title={inv.status === 'APPROVED' ? undefined : 'Declinable once the payer approves'}
                               onClick={() => decline(inv.invoiceId)}>Decline</button>{' '}</>
                   )}
                   {fundedByMe(inv) && (
@@ -157,7 +171,8 @@ export default function LenderView({ me }) {
                           onClick={async () => { try { setTrail(await getHistory(inv.invoiceId)); } catch {} }}>Audit trail</button>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
         <p className="sub" style={{ marginBottom: 0 }}>
