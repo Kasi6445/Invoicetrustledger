@@ -300,12 +300,14 @@ test.describe('Real-document scenarios (fixture PDFs, as-is)', () => {
       .toContain(twinA);
     expect(twin.risk.reasons.join(' | ')).toMatch(/Same document already registered .* re-numbered resubmission \(−25\)/);
 
-    // Lender console: the amber ⚠ similar chip on the flagged row.
+    // Lender console: the amber ⚠ similar chip on the flagged row. Scope to
+    // twinB's INVOICE-NUMBER cell (first column) — twinA's row also quotes
+    // twinB inside its (symmetric) same-document risk reason.
     await logout(page);
     await loginAs(page, /lloyds/i);
     await page.getByRole('button', { name: /^All \(/ }).click();
-    const row = page.locator('tr').filter({ hasText: twinB }).first();
-    await expect(row).toBeVisible({ timeout: 15_000 });
+    const row = page.locator('tr', { has: page.locator('td:first-child', { hasText: twinB }) });
+    await expect(row).toHaveCount(1, { timeout: 15_000 });
     await expect(row.locator('div.similar'), 'flagged row must carry the ⚠ similar chip')
       .toBeVisible();
 

@@ -303,11 +303,13 @@ test('full invoice lifecycle: OCR → register → approve → fund → DUPLICAT
     expect((await apiState(fetch, INV_NO)).length).toBe(1);
 
     // The lender never even sees a second row for the number (All tab shows
-    // everything, including invoices financed by others).
+    // everything, including invoices financed by others). Match the INVOICE-
+    // NUMBER cell (first column), not whole-row text: other rows may quote
+    // INV_NO inside their similar-invoice risk reasons (same-document flag).
     await logout(page);
     await loginAs(page, /lloyds/i);
     await page.getByRole('button', { name: /^All \(/ }).click();
-    await expect(page.locator('tr').filter({ hasText: INV_NO })).toHaveCount(1);
+    await expect(page.locator('tr td:first-child').filter({ hasText: INV_NO })).toHaveCount(1);
   });
 
   // =========================================================================

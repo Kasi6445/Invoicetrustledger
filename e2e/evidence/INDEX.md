@@ -1,10 +1,13 @@
 # Invoice Trust Ledger — E2E evidence index
 
-Final clean run: 2026-07-23 · **18/18 tests passed** (14 API-contract + 1 full
-UI lifecycle + 3 real-document scenarios) against the **live Hyperledger Fabric
-network** (`LEDGER_MODE=fabric`, chaincode `invoicecc` on `mychannel`), under
-the **v2 rules**: strict single-use invoice numbers (no tamper flag), lender
-declines, and lender-to-lender anonymity — see `docs/RULES.md`.
+Final clean run: 2026-07-23 · **19/19 tests passed** (14 API-contract + 1 full
+UI lifecycle + 4 real-document scenarios) against the **live Hyperledger Fabric
+network** (`LEDGER_MODE=fabric`, chaincode `invoicecc` on `mychannel`, freshly
+redeployed), under the **v3 rules**: strict single-use invoice numbers (no
+tamper flag), lender declines, lender-to-lender anonymity, and the API-side
+similar-invoice flag — see `docs/RULES.md`. The `DUPLICATE INVOICE BLOCKED`
+message now labels the internal ledger record id (`ledger record: inv-…`) so it
+can't be misread as a second invoice number.
 Full machine-readable results: `../playwright-report/` (open with `npm run report`).
 
 ## Scenario 1 — Full invoice lifecycle (unique invoice number per run)
@@ -32,7 +35,7 @@ Video: `full-lifecycle.webm` — the entire flow below in one continuous recordi
 - `06-audit-trail-immutable-history.png` — proves the immutable history modal:
   REGISTERED → APPROVED → FINANCED, each entry carrying a real Fabric
   transaction id and timestamp.
-- `07-supplier-duplicate-invoice-blocked.png` — proves the v2 registration
+- `07-supplier-duplicate-invoice-blocked.png` — proves the single-use-number
   rule: re-registering the same invoice number with a different amount
   (₹7,50,000 vs ₹5,00,000) is REJECTED live at registration — red banner
   "DUPLICATE INVOICE BLOCKED … Possible tampered or fake invoice." — and the
@@ -58,6 +61,16 @@ Video: `full-lifecycle.webm` — the entire flow below in one continuous recordi
 - `R5-lender-sees-no-tampered-row.png` — proves the lender console (All tab)
   never shows a ₹7,50,000 row for INV-2026-007: the fake never reached the
   ledger at all.
+- `R6-same-pdf-new-number-registered.png` — R4 scenario: the number-reuse
+  workaround. The SAME PDF is registered under a NEW invoice number and
+  SUCCEEDS (different numbers are never blocked — recurring billing is
+  legitimate). Registration is allowed; the net is the read-time flag below.
+- `R7-lender-similar-flag-same-document.png` — proves the strong similar-invoice
+  flag: because the two registrations share an identical `docHash`, the lender
+  row carries the amber ⚠ similar chip and the expanded risk grade reads
+  "Same document already registered as … — possible re-numbered resubmission
+  (−25)", naming the twin invoice number. Detection in the system; the funding
+  decision (Decline) stays with the institution.
 
 ## Cryptographic doc-integrity proof (`hash-proof.txt`)
 
@@ -73,5 +86,7 @@ role enforcement (403s), fund-before-approval rejected, APPROVED, lender
 decline (recorded, status unchanged, no double-decline, doesn't block funding),
 FINANCED, **DUPLICATE FINANCING BLOCKED** (idempotent, competitor name masked),
 lender anonymity on reads + history ("another financial institution", foreign
-decline reasons stripped, payer/supplier see real names), immutable 3-entry
-history with txIds, and field-level RBAC masking for payer / lender / supplier.
+decline reasons stripped, payer/supplier see real names), the soft
+similar-invoice flag (same supplier+payer+amount under different numbers →
+informational, score unchanged), immutable 3-entry history with txIds, and
+field-level RBAC masking for payer / lender / supplier.
