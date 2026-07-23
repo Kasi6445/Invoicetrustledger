@@ -33,6 +33,7 @@ import * as fs from 'fs';
  */
 
 const PDF = path.join(__dirname, '..', 'fixtures', 'invoice-clean-INV-2026-007.pdf');
+const PDF_TAMPERED = path.join(__dirname, '..', 'fixtures', 'invoice-TAMPERED-INV-2026-007.pdf');
 const EVIDENCE = path.join(__dirname, '..', 'evidence');
 const RUN = Date.now();
 const INV_NO = `INV-E2E-${RUN}`; // unique per run -> repeatable suite
@@ -87,11 +88,14 @@ async function fillSmart(loc: Locator, value: string) {
 }
 
 // Fill the supplier register form manually (OCR-independent). requestedAmount is
-// always set because the ledger requires it and the Register button is disabled
-// without it.
+// always set because the ledger requires it, and the invoice copy is mandatory —
+// the Register button stays disabled without either. Pass `pdf` to attach the
+// invoice copy (callers that already uploaded one separately can omit it).
 async function fillRegisterForm(page: Page, o: {
-  invoiceNumber: string; amount: string; requestedAmount: string; dueDate: string; invoiceDate?: string;
+  invoiceNumber: string; amount: string; requestedAmount: string; dueDate: string;
+  invoiceDate?: string; pdf?: string;
 }) {
+  if (o.pdf) await page.locator('input[type="file"]').first().setInputFiles(o.pdf);
   await field(page, /invoice ?number/i, 'invoiceNumber').fill(o.invoiceNumber);
   await fillSmart(field(page, /payer/i, 'payerName'), 'BigRetail Ltd');
   await field(page, /amount/i, 'amount').fill(o.amount);
@@ -248,7 +252,8 @@ test('full invoice lifecycle: register → approve → fund → payment-instruct
     await logout(page);
     await loginAs(page, /supplier|sri lakshmi/i);
     await fillRegisterForm(page, {
-      invoiceNumber: INV_NO, amount: '750000', requestedAmount: '700000', dueDate: '2026-09-15',
+      invoiceNumber: INV_NO, amount: '750000', requestedAmount: '675000', dueDate: '2026-09-15',
+      pdf: PDF_TAMPERED,
     });
     await page.getByRole('button', { name: /register on ledger/i }).click();
 
@@ -266,4 +271,8 @@ test('full invoice lifecycle: register → approve → fund → payment-instruct
     // Payer is never a funder — the entitlement unlock must not reach them.
     await expect(page.getByText(FULL_BANK_ACCOUNT)).toHaveCount(0);
   });
+  // NOTE: the main-page recording (video:'on') is written to test-results/ by
+  // Playwright on context close; it is copied to evidence/full-lifecycle.webm after
+  // the run (the fixture page can't be closed mid-test, so it can't self-copy the way
+  // the OtherBank console video does above). The OtherBank clip auto-copies (line ~237).
 });

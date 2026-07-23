@@ -8,12 +8,10 @@ _Last updated: 2026-07-23._
 - **Commit (HEAD):** `f16b12c` — _Exclude local settings from repository_
 - **Remote:** `origin` → https://github.com/Kasi6445/Invoicetrustledger.git — `main` is pushed and up to date.
 
-> ⚠️ **Branch note (changed):** earlier drafts of the runbook told you to check out
-> `v3-similar-invoice-flag`. **That branch no longer exists** (not locally, not on the remote).
-> All of the v2, v3 and CR01 work is now linear on `main`. **The demo runs from `main`.**
-> `docs/RUNBOOK.md`, the root `RUNBOOK.md`, and `CLAUDE.md` still say "checkout
-> `v3-similar-invoice-flag`" in their morning-ritual sections — that instruction is stale and is
-> listed as an open item below. Ignore it; use `main`.
+> ⚠️ **Branch note:** the old `v3-similar-invoice-flag` branch no longer exists (not locally,
+> not on the remote). All of the v2, v3 and CR01 work is now linear on `main`. **The demo runs
+> from `main`.** The morning-ritual sections in `docs/RUNBOOK.md`, root `RUNBOOK.md` and
+> `CLAUDE.md` were corrected to `git checkout main` (hardening Task 1).
 
 ## What's done
 
@@ -27,36 +25,45 @@ _Last updated: 2026-07-23._
     `LEDGER REJECTED` banner logic in `LenderView` was deliberately left untouched.
   - e2e + evidence (commit `d3269e5`): Gemini stubbed suite-wide, entitlement/masking coverage,
     structural risk cap (an unrated payer can never grade A — capped at B), docs updated.
-- **e2e suite green:** last clean run **23/23** (17 API-contract + 1 full UI lifecycle + 4
+- **Pre-demo hardening pass** — landed on `main` (this session):
+  - **Task 1:** morning ritual repointed to `main` (dead-branch fix).
+  - **Task 2:** status-aware lender buttons (REGISTERED disabled "Awaiting payer approval";
+    FINANCED stays clickable but amber "Attempt funding" + "Prior assignment recorded on ledger",
+    funder never named).
+  - **Task 3:** the invoice copy is **MANDATORY** — no invoice registers without a real document
+    hash (enforced at the ledger, verified by a direct `peer chaincode invoke` returning
+    `INVOICE COPY REQUIRED`; the API also fast-fails 400). seed.js/autoSeed attach documents.
+  - **Task 4:** financing cap **tightened to 90%** of face value (dual-updated in both engines +
+    RULES.md R1b; boundary verified: 90.00% registers, 90.02% rejects).
+- **Chaincode deployed as `invoicecc` v2.0 / sequence 1** on `mychannel` (fresh channel → the
+  first definition is always sequence 1; the version label is bumped to 2.0 for provenance).
+- **e2e suite green:** last clean run **24/24** (18 API-contract + 1 full UI lifecycle + 4
   real-document + 1 targeted OCR), against the **live Fabric** network on a fresh ledger. See
   `e2e/evidence/INDEX.md`.
-- **Evidence regenerated:** screenshots + `hash-proof.txt` + two videos under `e2e/evidence/`.
-- **`api/restart.sh`** exists and is committed (`2f9fbf0`) — the only sanctioned way to (re)start
-  the API. Kills the PID owning `:3000` by socket ownership (never a name match), refuses to
-  start on a busy port, prints the `LEDGER_MODE` it came up in.
-- Backend conformance last known green: `test-flow.sh` **26/26** and `regression.sh` **+7/7**
-  hardening checks, in both mock and fabric mode.
+- **Evidence regenerated (this session):** 16 screenshots + `hash-proof.txt` + two videos under
+  `e2e/evidence/`.
+- **`api/restart.sh`** is committed (`2f9fbf0`) and was exercised this session (came up
+  `LEDGER_MODE = fabric`) — the only sanctioned way to (re)start the API.
+- Backend conformance green: `test-flow.sh` **26/26** and `regression.sh` **+7/7** hardening
+  checks, in **both** mock and fabric mode.
 
 ## Still open
 
-1. **Verify `api/restart.sh` end-to-end on a cold laptop.** It was reported verified three ways in
-   a prior session (server running / nothing running / orphaned non-server process on :3000), but
-   that verification predates the current machine state — re-run it as part of the next cold boot
-   and confirm it prints `LEDGER_MODE = fabric`.
-2. **Copy the `.webm` demo videos off the laptop.** Canonical copies live at
-   `e2e/evidence/full-lifecycle.webm` and `e2e/evidence/otherbank-kill-shot.webm`. Backups exist at
-   `~/itl-demo-backup/`, `~/demo-backup/`, and `/mnt/c/Users/sandh/itl-demo-backup/`. "Off the
-   laptop" (a real cloud/USB copy the judges can reach if the machine dies) is still worth doing.
-3. **Fix the morning-ritual + branch note in the runbook.** `docs/RUNBOOK.md`, root `RUNBOOK.md`,
-   and `CLAUDE.md` still instruct `git checkout v3-similar-invoice-flag`. That branch is gone;
-   update all three to `main` (they are otherwise correct, including the `restart.sh` step). The
-   two RUNBOOK copies must stay byte-identical.
+1. **Copy the `.webm` demo videos to durable off-laptop storage.** Canonical copies are
+   `e2e/evidence/full-lifecycle.webm` and `e2e/evidence/otherbank-kill-shot.webm`; both were
+   copied to `~/demo-backup/` (and older copies exist under `~/itl-demo-backup/` and
+   `/mnt/c/Users/sandh/itl-demo-backup/`). A real cloud/USB copy the judges could reach if the
+   laptop dies is still worth doing.
+
+_Resolved this session: `api/restart.sh` exercised end-to-end (came up `LEDGER_MODE = fabric`);
+the runbook/CLAUDE morning-ritual branch note corrected to `main` (Task 1)._
 
 ## Current runtime state (as of this file)
 
-The demo is **fully cold**: Fabric network is **down** (0 containers), nothing on `:3000` or
-`:5173`, and the (last-seeded) ledger is wiped because Fabric state does not survive
-`network.sh down`. Bring it up with the sequence below.
+The demo is **UP** after the hardening pass: Fabric network running (8 containers, chaincode
+`invoicecc` v2.0/seq1), API on `:3000` in `LEDGER_MODE=fabric`, portal dev server on `:5173`,
+ledger seeded. If you are resuming from a cold laptop instead, Fabric state does **not** survive
+`network.sh down` — bring everything up with the sequence below.
 
 ## Morning ritual — cold start to running demo (fabric mode)
 
@@ -68,7 +75,7 @@ cd ~/invoice-trust-ledger && git checkout main && git status
 cd ~/fabric/fabric-samples/test-network
 ./network.sh down
 ./network.sh up createChannel -c mychannel -ca
-./network.sh deployCC -ccn invoicecc -ccp ~/invoice-trust-ledger/chaincode -ccl javascript
+./network.sh deployCC -ccn invoicecc -ccp ~/invoice-trust-ledger/chaincode -ccl javascript -ccv 2.0 -ccs 1
 docker ps --format 'table {{.Names}}\t{{.Status}}'   # expect 8 containers
 
 # 2. API — ALWAYS via restart.sh (never `node server.js &`). Confirm it prints LEDGER_MODE = fabric.

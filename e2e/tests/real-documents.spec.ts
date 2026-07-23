@@ -153,7 +153,7 @@ test.describe('Real-document scenarios (fixture PDFs, as-is)', () => {
 
     await loginAs(page, /supplier|sri lakshmi/i);
     const unique = `INV-014-E2E-${RUN}`;   // unique number so R1 stays repeatable
-    await uploadThenFill(page, PDF_014, { invoiceNumber: unique, amount: '325000', requestedAmount: '300000', dueDate: '2026-09-20' });
+    await uploadThenFill(page, PDF_014, { invoiceNumber: unique, amount: '325000', requestedAmount: '290000', dueDate: '2026-09-20' });
     await shot(page, 'ocr-second-layout-INV-2026-014');
     await page.getByRole('button', { name: /register on ledger/i }).click();
 
@@ -199,7 +199,7 @@ test.describe('Real-document scenarios (fixture PDFs, as-is)', () => {
     expect(before.length, 'R2 must have left INV-2026-007 on the ledger').toBeGreaterThan(0);
 
     await loginAs(page, /supplier|sri lakshmi/i);
-    await uploadThenFill(page, PDF_TAMPERED, { invoiceNumber: 'INV-2026-007', amount: '750000', requestedAmount: '700000', dueDate: '2026-09-15' });
+    await uploadThenFill(page, PDF_TAMPERED, { invoiceNumber: 'INV-2026-007', amount: '750000', requestedAmount: '675000', dueDate: '2026-09-15' });
     await shot(page, 'tampered-pdf-ocr-inflated-amount');
     await page.getByRole('button', { name: /register on ledger/i }).click();
 
@@ -224,13 +224,13 @@ test.describe('Real-document scenarios (fixture PDFs, as-is)', () => {
     const twinB = `INV-014-TWIN-${RUN}-B`;
 
     await loginAs(page, /supplier|sri lakshmi/i);
-    await uploadThenFill(page, PDF_014, { invoiceNumber: twinA, amount: '325000', requestedAmount: '300000', dueDate: '2026-09-20' });
+    await uploadThenFill(page, PDF_014, { invoiceNumber: twinA, amount: '325000', requestedAmount: '290000', dueDate: '2026-09-20' });
     await page.getByRole('button', { name: /register on ledger/i }).click();
     await expect.poll(async () => (await ledgerFindByNumber(twinA)).length, { timeout: 30_000 }).toBe(1);
 
     await page.reload();
     await loginAs(page, /supplier|sri lakshmi/i);
-    await uploadThenFill(page, PDF_014, { invoiceNumber: twinB, amount: '325000', requestedAmount: '300000', dueDate: '2026-09-20' });
+    await uploadThenFill(page, PDF_014, { invoiceNumber: twinB, amount: '325000', requestedAmount: '290000', dueDate: '2026-09-20' });
     await page.getByRole('button', { name: /register on ledger/i }).click();
     await expect.poll(async () => (await ledgerFindByNumber(twinB)).length, { timeout: 30_000 }).toBe(1);
     await shot(page, 'same-pdf-new-number-registered');

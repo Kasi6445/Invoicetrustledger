@@ -1,11 +1,15 @@
 # Invoice Trust Ledger — E2E evidence index
 
-Final clean run: 2026-07-23 · **23/23 tests passed** (17 API-contract + 1 full
+Final clean run: 2026-07-23 · **24/24 tests passed** (18 API-contract + 1 full
 UI lifecycle + 4 real-document scenarios + 1 targeted OCR test) against the
 **live Hyperledger Fabric network** (`LEDGER_MODE=fabric`, chaincode `invoicecc`
-on `mychannel`, fresh ledger). Covers the v3 rules **plus CR01** (financing cap,
-multi-document hashes, payer credit profiles, funder-only payment-instructions
-entitlement) — see `docs/RULES.md` and `docs/CHANGE-REQUEST-01.md`.
+**v2.0 / sequence 1** on `mychannel`, fresh ledger). Covers the v3 rules **plus
+CR01** (multi-document hashes, payer credit profiles, funder-only
+payment-instructions entitlement) **plus the pre-demo hardening pass**:
+- **invoice copy MANDATORY** — no invoice registers without a real document hash
+  (enforced at the ledger, not just the API; the API also fast-fails 400);
+- **financing cap tightened to 90%** of face value (was 100%).
+See `docs/RULES.md` (R1b, R1c) and `docs/CHANGE-REQUEST-01.md`.
 
 **Gemini is stubbed** in the whole suite (zero live quota): `/ai/extract` is
 intercepted with a fixed response. The OCR path is covered by one targeted test
@@ -69,8 +73,9 @@ sha256(file) vs on-chain docHash for the 014 and 007 invoice copies — MATCH: Y
 
 ## Scenario 3 — API contract (`api-regression.spec.ts`, no browser, zero Gemini)
 
-17 direct assertions: auth/roles, REGISTERED shape, DUPLICATE INVOICE BLOCKED
-(± tamper note), **FINANCING REQUEST REJECTED** (requestedAmount > amount),
+18 direct assertions: auth/roles, REGISTERED shape, DUPLICATE INVOICE BLOCKED
+(± tamper note), **FINANCING REQUEST REJECTED** (requestedAmount over the 90%
+cap), **register with no invoice copy → 400**,
 fund-before-approval, lender decline (no double-decline, doesn't block others),
 FINANCED, **DUPLICATE FINANCING BLOCKED** (competitor masked), lender anonymity
 on reads + history, immutable history with txIds, and CR01 masking: payer
