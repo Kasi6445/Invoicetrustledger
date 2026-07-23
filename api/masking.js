@@ -1,14 +1,16 @@
 'use strict';
-// Field-level RBAC rules:
-// - Payer sees commercial truth; NOT full bank details, NOT KYC refs,
-//   NOT lender risk data.
-// - Lender sees funding & risk data; KYC/PII masked by default,
-//   bank account last-4 only. One lender NEVER sees another lender's name —
-//   competitor identities become 'another financial institution'.
-// - Supplier sees their own record in full.
-// The chain keeps the truth; masking is a read-time, per-viewer concern here.
+// Field-level RBAC rules (read-time, per-viewer; the chain keeps the full truth):
+// - Payer sees commercial truth; NOT full bank details, NOT KYC refs, NOT lender
+//   risk/financing economics; and not their own profile echoed back to them.
+// - Lender sees funding & risk data + the payer's credit profile. Supplier bank
+//   details stay masked UNLESS this lender funded this invoice (entitlement
+//   unlock). One lender NEVER sees another lender's name — competitor identities
+//   become 'another financial institution'.
+// - Supplier sees their own record in full (but not the payer's credit profile).
 
 const last4 = v => (v ? '••••' + String(v).slice(-4) : null);
+// Keep the bank prefix (already visible via bankName) but mask the routable rest.
+const maskIfsc = v => (v ? String(v).slice(0, 4) + '•••••••' : null);
 const OTHER_INSTITUTION = 'another financial institution';
 
 // Strip competitor identities from a single invoice record for a lender viewer.
@@ -24,29 +26,46 @@ function maskLenderIdentities(record, viewerName) {
     return out;
 }
 
-function maskForRole(invoice, profile, role, viewerName) {
+function maskForRole(invoice, supplierProfile, payerProfile, role, viewerName) {
     let out = { ...invoice };
-    const p = profile ? { ...profile } : null;
+    const sp = supplierProfile ? { ...supplierProfile } : null;
+    const pp = payerProfile ? { ...payerProfile } : null;
 
     if (role === 'payer') {
-        if (p) {
-            p.bankAccount = last4(p.bankAccount);
-            p.sortCode = '••-••-••';
-            p.kycDocRef = 'restricted';
+        if (sp) {
+            sp.bankAccount = last4(sp.bankAccount);
+            sp.ifsc = maskIfsc(sp.ifsc);
+            sp.kycDocRef = 'restricted';
         }
-        delete out.risk;            // lender underwriting data — restricted for payer
+        delete out.risk;             // lender underwriting data — restricted for payer
+        delete out.requestedAmount;  // financing economics — not the payer's business
+        out.supplierProfile = sp;
+        out.payerProfile = null;     // the payer already knows their own terms
+        return out;
     }
 
     if (role === 'lender') {
-        if (p) {
-            p.bankAccount = last4(p.bankAccount);
-            p.kycDocRef = 'vault://masked (entitlement required)';
+        // Entitlement unlock: evaluate against the RAW invoice, BEFORE anonymity
+        // masking rewrites the output. If anonymity ran first, the funder's own
+        // financedBy would already be masked and they'd fail their own check.
+        const funderIsViewer =
+            invoice.status === 'FINANCED' && invoice.financedBy === viewerName;
+        if (sp) {
+            if (!funderIsViewer) {
+                sp.bankAccount = last4(sp.bankAccount);
+                sp.ifsc = maskIfsc(sp.ifsc);
+            }
+            sp.kycDocRef = 'vault://masked (entitlement required)';  // always masked
         }
-        out = maskLenderIdentities(out, viewerName);
+        out = maskLenderIdentities(out, viewerName);   // anonymity, after entitlement read
+        out.supplierProfile = sp;
+        out.payerProfile = pp;        // full payer credit profile drives underwriting
+        return out;
     }
 
-    // supplier: no masking on their own data
-    out.supplierProfile = p;
+    // supplier: own record unmasked; not shown the payer's confidential profile
+    out.supplierProfile = sp;
+    out.payerProfile = null;
     return out;
 }
 

@@ -19,6 +19,18 @@ function validateRegister(req, res, next) {
         || !Number.isFinite(amount) || amount <= 0)
         fields.amount = 'amount must be a number greater than 0';
 
+    // requestedAmount (advance sought) must be a positive number here; the ledger
+    // enforces the <= amount cap as the business rule (FINANCING REQUEST REJECTED).
+    const reqAmount = Number(b.requestedAmount);
+    if (b.requestedAmount === undefined || b.requestedAmount === null || String(b.requestedAmount).trim() === ''
+        || !Number.isFinite(reqAmount) || reqAmount <= 0)
+        fields.requestedAmount = 'requestedAmount must be a number greater than 0';
+
+    // invoiceDate is optional; if sent it must be YYYY-MM-DD (same as dueDate)
+    if (b.invoiceDate !== undefined && b.invoiceDate !== null && String(b.invoiceDate).trim() !== ''
+        && !/^\d{4}-\d{2}-\d{2}$/.test(String(b.invoiceDate).trim()))
+        fields.invoiceDate = 'invoiceDate must be in YYYY-MM-DD format';
+
     // currency defaults to INR server-side when omitted; if sent, it must be a 3-letter code
     if (b.currency !== undefined && b.currency !== null && String(b.currency).trim() !== ''
         && !/^[A-Za-z]{3}$/.test(String(b.currency).trim()))

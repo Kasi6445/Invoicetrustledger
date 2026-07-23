@@ -20,18 +20,22 @@ async function post(p, body, token) {
     const l = (await post('/auth/login', { username: 'lloyds',    password: 'demo123' })).token;
 
     const a = await post('/invoices', { invoiceNumber: 'INV-2026-001', payerName: 'BigRetail Ltd',
-        amount: 250000, currency: 'INR', dueDate: '2026-08-15' }, s);
+        amount: 250000, requestedAmount: 225000, currency: 'INR',
+        invoiceDate: '2026-07-05', dueDate: '2026-08-15' }, s);
     await post(`/invoices/${a.invoiceId}/approve`, {}, p);
     await post(`/invoices/${a.invoiceId}/fund`, {}, l);                 // one already-financed example
 
     const b = await post('/invoices', { invoiceNumber: 'INV-2026-002', payerName: 'BigRetail Ltd',
-        amount: 400000, currency: 'INR', dueDate: '2026-09-01' }, s);
+        amount: 400000, requestedAmount: 360000, currency: 'INR',
+        invoiceDate: '2026-07-20', dueDate: '2026-09-01' }, s);
     await post(`/invoices/${b.invoiceId}/approve`, {}, p);              // one ready-to-fund example
 
     const c = await post('/invoices', { invoiceNumber: 'INV-2026-003', payerName: 'MegaMart Ltd',
-        amount: 180000, currency: 'INR', dueDate: '2026-09-20' }, s);   // search-demo: REGISTERED
+        amount: 180000, requestedAmount: 150000, currency: 'INR',
+        invoiceDate: '2026-08-01', dueDate: '2026-09-20' }, s);          // search-demo: REGISTERED
     const d = await post('/invoices', { invoiceNumber: 'INV-2026-004', payerName: 'MegaMart Ltd',
-        amount: 620000, currency: 'INR', dueDate: '2026-10-05' }, s);
+        amount: 620000, requestedAmount: 550000, currency: 'INR',
+        invoiceDate: '2026-08-10', dueDate: '2026-10-05' }, s);
     await post(`/invoices/${d.invoiceId}/approve`, {}, p);              // search-demo: ready to fund
 
     console.log('Seeded:', a.invoiceId, b.invoiceId, c.invoiceId, d.invoiceId);

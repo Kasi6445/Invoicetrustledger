@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Full regression: the 22 business-flow checks (test-flow.sh) PLUS API-hardening
+# Full regression: the 26 business-flow checks (test-flow.sh) PLUS API-hardening
 # checks. Server must be running. Usage: bash regression.sh
 API=http://localhost:3000
 DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -54,21 +54,21 @@ CODE=$(curl -s -o /tmp/itl_body -w "%{http_code}" -X POST $API/invoices/anything
 #  curl infers application/pdf from the .pdf extension)
 head -c 6291456 /dev/zero > /tmp/itl_big.pdf
 CODE=$(curl -s -o /tmp/itl_body -w "%{http_code}" $API/invoices -H "Authorization: Bearer $ST" \
-  -F "invoiceNumber=INV-BIG-1" -F "payerName=BigRetail Ltd" -F "amount=1000" \
-  -F "currency=INR" -F "dueDate=2026-09-30" -F "doc=@/tmp/itl_big.pdf")
+  -F "invoiceNumber=INV-BIG-1" -F "payerName=BigRetail Ltd" -F "amount=1000" -F "requestedAmount=900" \
+  -F "currency=INR" -F "dueDate=2026-09-30" -F "invoiceCopy=@/tmp/itl_big.pdf")
 [ "$CODE" = "413" ] && grep -q '"code":"UPLOAD_TOO_LARGE"' /tmp/itl_body \
   && ok "oversized file (6MB) → 413 rejected" || bad "oversized upload" "HTTP $CODE $(cat /tmp/itl_body)"
 
 # wrong-type upload → rejected (curl sends .txt as text/plain — not an allowed type)
 echo "just text" > /tmp/itl_bad.txt
 CODE=$(curl -s -o /tmp/itl_body -w "%{http_code}" $API/invoices -H "Authorization: Bearer $ST" \
-  -F "invoiceNumber=INV-TYPE-1" -F "payerName=BigRetail Ltd" -F "amount=1000" \
-  -F "currency=INR" -F "dueDate=2026-09-30" -F "doc=@/tmp/itl_bad.txt")
+  -F "invoiceNumber=INV-TYPE-1" -F "payerName=BigRetail Ltd" -F "amount=1000" -F "requestedAmount=900" \
+  -F "currency=INR" -F "dueDate=2026-09-30" -F "invoiceCopy=@/tmp/itl_bad.txt")
 [ "$CODE" = "415" ] && grep -q '"code":"UPLOAD_TYPE"' /tmp/itl_body \
   && ok "wrong-type file (.txt) → 415 rejected" || bad "wrong-type upload" "HTTP $CODE $(cat /tmp/itl_body)"
 
 rm -f /tmp/itl_big.pdf /tmp/itl_bad.txt /tmp/itl_body
 
 echo "———————————————"
-echo "HARDENING RESULT: $PASS passed, $FAIL failed (plus 22/22 baseline above)"
+echo "HARDENING RESULT: $PASS passed, $FAIL failed (plus 26/26 baseline above)"
 [ $FAIL -eq 0 ]

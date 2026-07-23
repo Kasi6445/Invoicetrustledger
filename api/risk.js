@@ -10,29 +10,63 @@ const commercialKey = inv =>
     `${String(inv.supplierVRN || '').trim().toUpperCase()}|` +
     `${String(inv.payerName || '').trim().toLowerCase()}|${Number(inv.amount)}`;
 
-function riskScore(inv, all = []) {
+// Weights sum to 100 (max): five ledger-derived signals (80) plus two
+// underwriting signals introduced in CR01 — advance ratio (12) and payer
+// payment terms (8). Thresholds re-tuned below to A>=78 / B>=55 because those
+// two are softer credit inputs than the hard on-ledger facts.
+function riskScore(inv, all = [], payerProfile = null) {
     let score = 0; const reasons = [];
 
     if (inv.status === 'APPROVED' || inv.status === 'FINANCED') {
-        score += 40; reasons.push('Payer-approved on ledger (+40)');
+        score += 35; reasons.push('Payer-approved on ledger (+35)');
     } else reasons.push('Awaiting payer approval (+0)');
 
     if (inv.docHash && inv.docHash !== 'no-document') {
-        score += 20; reasons.push('Document hash anchored on-chain (+20)');
+        score += 15; reasons.push('Document hash anchored on-chain (+15)');
     } else reasons.push('No document hash anchored (+0)');
 
     const daysToDue = inv.dueDate ? (new Date(inv.dueDate) - Date.now()) / 86400000 : -1;
     if (daysToDue > 7 && daysToDue < 180) {
-        score += 15; reasons.push('Due date in a sane window (+15)');
+        score += 10; reasons.push('Due date in a sane window (+10)');
     } else reasons.push('Due date outside 7–180 day window (+0)');
 
     if (Number(inv.amount) > 0 && Number(inv.amount) <= 1000000) {
-        score += 15; reasons.push('Amount within routine financing band (+15)');
+        score += 10; reasons.push('Amount within routine financing band (+10)');
     } else reasons.push('Amount outside routine band (+0)');
 
     if (!inv.declines || inv.declines.length === 0) {
         score += 10; reasons.push('No lender declines on ledger (+10)');
     } else reasons.push(`⚠ Declined by ${inv.declines.length} institution(s) (+0)`);
+
+    // Advance ratio: requestedAmount vs face value. A smaller advance is a safer
+    // book — the buffer between advance and invoice value absorbs disputes.
+    const face = Number(inv.amount);
+    const reqAmt = Number(inv.requestedAmount);
+    if (face > 0 && reqAmt > 0) {
+        const ratio = reqAmt / face;
+        const pct = Math.round(ratio * 100);
+        if (ratio <= 0.9) {
+            score += 12; reasons.push(`Conservative advance (${pct}% of face) (+12)`);
+        } else if (ratio <= 0.95) {
+            score += 6; reasons.push(`Moderate advance (${pct}% of face) (+6)`);
+        } else {
+            reasons.push(`⚠ Aggressive advance (${pct}% of face) (+0)`);
+        }
+    } else reasons.push('Advance ratio unavailable (+0)');
+
+    // Payer payment terms: shorter terms return the lender's money sooner.
+    const terms = payerProfile && payerProfile.paymentTerms;
+    if (terms) {
+        const m = String(terms).match(/(\d+)/);
+        const days = m ? Number(m[1]) : null;
+        if (days !== null && days <= 30) {
+            score += 8; reasons.push(`Short payer terms (${terms}) (+8)`);
+        } else if (days !== null && days <= 60) {
+            score += 5; reasons.push(`Standard payer terms (${terms}) (+5)`);
+        } else {
+            score += 2; reasons.push(`Extended payer terms (${terms}) (+2)`);
+        }
+    } else reasons.push('Payer terms unknown (+0)');
 
     // Similarity pass (API-layer detection, RULES.md R11): number-uniqueness
     // closed the front door; the workaround is re-registering the same invoice
@@ -53,7 +87,7 @@ function riskScore(inv, all = []) {
         reasons.push(`ℹ Similar invoice(s) on ledger (same supplier, payer, amount): ${sameCommercials.join(', ')} — verify not a re-numbered resubmission`);
     }
 
-    const grade = score >= 80 ? 'A' : score >= 55 ? 'B' : 'C';
+    const grade = score >= 78 ? 'A' : score >= 55 ? 'B' : 'C';
     const risk = { score, grade, reasons };
     // Inside risk on purpose: masking already strips risk for the payer, so the
     // flag reaches lenders and the supplier only. The twin numbers named here

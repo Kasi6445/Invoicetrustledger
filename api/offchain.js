@@ -7,18 +7,30 @@ const FILE = path.join(__dirname, 'data', 'offchain.json');
 
 function load() {
     if (!fs.existsSync(FILE)) {
-        // seed: the supplier's sensitive profile (never stored on-chain)
+        // seed: sensitive party data (never stored on-chain — only hashes go on-chain)
         const seed = {
             supplierProfiles: {
                 VRN123456: {
                     legalName: 'Sri Lakshmi Textiles Pvt Ltd',
+                    bankName: 'HDFC Bank',
                     bankAccount: '004512349876',
-                    sortCode: '30-96-26',
+                    ifsc: 'HDFC0001234',   // Indian bank routing code (was a UK sortCode)
                     businessContact: 'accounts@srilakshmitextiles.in',
                     kycDocRef: 'vault://kyc/VRN123456/directors-id.pdf'
                 }
             },
-            docs: {}   // invoiceId -> { fileName, sha256 }
+            // Payer profiles key off payerName. The commercial terms and rating
+            // here drive the lender's credit decision; the payer sees their own.
+            payerProfiles: {
+                'BigRetail Ltd': {
+                    legalName: 'BigRetail India Pvt Ltd',
+                    paymentTerms: 'Net 60',
+                    payerRating: 'AA-',
+                    programLimit: 50000000,                 // ₹5 crore anchor programme limit
+                    settlementAccount: 'ICIC0004417 / 50200098761234'
+                }
+            },
+            docs: {}   // invoiceId -> { invoiceCopy: {fileName, sha256}, purchaseOrder: {...}, goodsReceived: {...} }
         };
         fs.mkdirSync(path.dirname(FILE), { recursive: true });
         fs.writeFileSync(FILE, JSON.stringify(seed, null, 2));

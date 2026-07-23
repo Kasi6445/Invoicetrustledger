@@ -56,7 +56,7 @@ module.exports = function mockLedger() {
     function applyWrite(fn, args, txId, timestamp) {
         if (fn === 'RegisterInvoice') {
             const [invoiceId, invoiceNumber, supplierName, supplierVRN,
-                   payerName, amount, currency, dueDate, docHash] = args;
+                   payerName, amount, requestedAmount, currency, invoiceDate, dueDate, docHashes] = args;
 
             if (store.has(invoiceId)) throw new Error(`Invoice id ${invoiceId} already exists`);
 
@@ -77,17 +77,45 @@ module.exports = function mockLedger() {
                 throw new Error(msg);
             }
 
+            // Financing cap: the requested advance can never exceed the invoice face
+            // value. Size bound on the single financing event — NOT partial financing.
+            const faceAmount = Number(amount);
+            const reqAmount = Number(requestedAmount);
+            if (!(faceAmount > 0) || !(reqAmount > 0) || reqAmount > faceAmount) {
+                throw new Error(
+                    `FINANCING REQUEST REJECTED: requested amount ${reqAmount} must be greater than 0 ` +
+                    `and no more than the invoice face value ${faceAmount}.`);
+            }
+
+            // docHashes: JSON string of { invoiceCopy, purchaseOrder, goodsReceived }
+            // SHA-256s. Parsed defensively; "" and "{}" mean none.
+            let docs = {};
+            const rawDocs = (docHashes === undefined || docHashes === null) ? '' : String(docHashes).trim();
+            if (rawDocs && rawDocs !== '{}') {
+                try {
+                    docs = JSON.parse(rawDocs);
+                } catch (e) {
+                    throw new Error(`Malformed docHashes JSON: ${e.message}`);
+                }
+                if (!docs || typeof docs !== 'object' || Array.isArray(docs)) {
+                    throw new Error('docHashes must be a JSON object of { name: sha256 } entries');
+                }
+            }
+
+            // docHash === the invoice-copy hash so risk.js/demo read it unchanged.
+            const docHash = docs.invoiceCopy || 'no-document';
             const inv = {
                 docType: 'invoice',
                 invoiceId, invoiceNumber, supplierName, supplierVRN, payerName,
-                amount: Number(amount), currency, dueDate, docHash,
+                amount: faceAmount, requestedAmount: reqAmount, currency,
+                invoiceDate, dueDate, docHash, docs,
                 status: 'REGISTERED', registeredAt: timestamp,
                 approvedAt: null, approvedBy: null,
                 financedAt: null, financedBy: null, settledAt: null,
                 fingerprint: fp
             };
             store.set(invoiceId, inv);
-            nums.set(nk, { invoiceId, amount: Number(amount), registeredAt: timestamp });
+            nums.set(nk, { invoiceId, amount: faceAmount, registeredAt: timestamp });
             pushHistory(invoiceId, inv, txId, timestamp);
             return inv;
         }

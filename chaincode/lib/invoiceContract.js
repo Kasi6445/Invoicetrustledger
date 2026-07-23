@@ -7,6 +7,9 @@ const crypto = require('crypto');
  * The ledger invariants (see docs/RULES.md — the portable spec for the GCUL rewrite):
  *   R1. An invoice number may be registered ONCE per supplier — any reuse, same
  *       or different amount, is rejected outright (duplicate invoice blocked).
+ *   R1b. Financing cap: requestedAmount must be > 0 and <= amount (face value).
+ *       This bounds the size of the single financing event; it is NOT partial
+ *       financing (there is still exactly one FundInvoice per invoice).
  *   R2. A lender may decline an APPROVED invoice; a decline is that lender's own
  *       credit decision and never blocks other lenders.
  *   R3. Only a REGISTERED invoice can be APPROVED or DISPUTED.
@@ -52,7 +55,7 @@ class InvoiceContract extends Contract {
 
     // ---------- STEP 1: REGISTER (supplier) ----------
     async RegisterInvoice(ctx, invoiceId, invoiceNumber, supplierName, supplierVRN,
-        payerName, amount, currency, dueDate, docHash) {
+        payerName, amount, requestedAmount, currency, invoiceDate, dueDate, docHashes) {
 
         // Rule 0: id not already used
         const existing = await ctx.stub.getState(`INV_${invoiceId}`);
@@ -78,12 +81,45 @@ class InvoiceContract extends Contract {
             throw new Error(msg);
         }
 
+        // Financing cap: the requested advance can never exceed the invoice face
+        // value. This is a size bound on the single financing event — NOT partial
+        // financing; there is still exactly one FundInvoice per invoice.
+        const faceAmount = Number(amount);
+        const reqAmount = Number(requestedAmount);
+        if (!(faceAmount > 0) || !(reqAmount > 0) || reqAmount > faceAmount) {
+            throw new Error(
+                `FINANCING REQUEST REJECTED: requested amount ${reqAmount} must be greater than 0 ` +
+                `and no more than the invoice face value ${faceAmount}.`
+            );
+        }
+
+        // docHashes: a JSON string of { invoiceCopy, purchaseOrder, goodsReceived }
+        // SHA-256s. Parsed defensively — this open slot lets the document schema
+        // grow without ever redeploying chaincode again. "" and "{}" mean none.
+        let docs = {};
+        const rawDocs = (docHashes === undefined || docHashes === null) ? '' : String(docHashes).trim();
+        if (rawDocs && rawDocs !== '{}') {
+            try {
+                docs = JSON.parse(rawDocs);
+            } catch (e) {
+                throw new Error(`Malformed docHashes JSON: ${e.message}`);
+            }
+            if (!docs || typeof docs !== 'object' || Array.isArray(docs)) {
+                throw new Error('docHashes must be a JSON object of { name: sha256 } entries');
+            }
+        }
+
         const now = this._txTime(ctx);
+        // Keep docHash === the invoice-copy hash so risk.js and the demo script
+        // (which read docHash) keep working unchanged.
+        const docHash = docs.invoiceCopy || 'no-document';
         const invoice = {
             docType: 'invoice',
             invoiceId, invoiceNumber, supplierName, supplierVRN, payerName,
-            amount: Number(amount), currency, dueDate,
-            docHash,                    // hash of the uploaded PDF (proof, not the file)
+            amount: faceAmount, requestedAmount: reqAmount, currency,
+            invoiceDate, dueDate,
+            docHash,                    // == docs.invoiceCopy — the invoice-copy proof
+            docs,                       // { invoiceCopy, purchaseOrder, goodsReceived } hashes
             status: 'REGISTERED',       // the state machine starts here
             registeredAt: now,
             approvedAt: null, approvedBy: null,
@@ -94,7 +130,7 @@ class InvoiceContract extends Contract {
 
         await ctx.stub.putState(`INV_${invoiceId}`, Buffer.from(JSON.stringify(invoice)));
         await ctx.stub.putState(numKey,
-            Buffer.from(JSON.stringify({ invoiceId, amount: Number(amount), registeredAt: now })));
+            Buffer.from(JSON.stringify({ invoiceId, amount: faceAmount, registeredAt: now })));
         return JSON.stringify(invoice);
     }
 

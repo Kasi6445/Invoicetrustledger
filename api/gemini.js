@@ -18,6 +18,8 @@ function simulatedExtraction() {
         currency: 'INR',
         invoiceDate: '2026-07-01',
         dueDate: '2026-08-30',
+        goodsDescription: '200 bales cotton yarn, 40s count',
+        poNumber: 'PO-BR-2026-3391',
         simulated: true,
         note: 'GEMINI_API_KEY not set — returned built-in sample fields. Add a key to .env for real OCR.'
     };
@@ -33,8 +35,11 @@ async function extractInvoice(buffer, mimeType) {
                 { text:
 `Read this invoice document. Return ONLY a JSON object, no markdown, no explanation:
 {"invoiceNumber":"", "supplierName":"", "supplierVRN":"", "payerName":"",
- "amount":0, "currency":"", "invoiceDate":"", "dueDate":""}
-Use empty string or 0 for anything not present. Dates as YYYY-MM-DD.` }
+ "amount":0, "currency":"", "invoiceDate":"", "dueDate":"",
+ "goodsDescription":"", "poNumber":""}
+Use empty string or 0 for anything not present. Dates as YYYY-MM-DD.
+goodsDescription: a short summary of the goods/services billed. poNumber: the
+purchase-order reference if the invoice cites one.` }
             ]
         }]
     };

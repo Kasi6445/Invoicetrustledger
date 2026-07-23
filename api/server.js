@@ -42,6 +42,10 @@ const upload = multer({
             `Unsupported file type ${file.mimetype} — only PDF, PNG or JPG invoices are accepted`));
     }
 });
+// The three supporting documents a registration may carry. Whitelist — used both
+// to accept uploads and to validate the :type on the download route.
+const REGISTER_DOCS = ['invoiceCopy', 'purchaseOrder', 'goodsReceived'];
+const registerUpload = upload.fields(REGISTER_DOCS.map(name => ({ name, maxCount: 1 })));
 
 /* ---- auth ---- */
 const loginLimiter = rateLimit({
@@ -73,23 +77,52 @@ function auth(...roles) {
     };
 }
 
-/* ---- STEP 1: supplier registers (file optional) ---- */
-app.post('/invoices', auth('supplier'), upload.single('doc'), validateRegister, async (req, res, next) => {
+/* ---- STEP 1: supplier registers (all documents optional) ---- */
+app.post('/invoices', auth('supplier'), registerUpload, validateRegister, async (req, res, next) => {
     try {
         const b = req.body;
         const invoiceId = 'inv-' + Date.now();
-        let docHash = 'no-document';
-        if (req.file) {
-            docHash = crypto.createHash('sha256').update(req.file.buffer).digest('hex');
-            const fileName = invoiceId + '-' + req.file.originalname;
-            fs.mkdirSync(path.join(__dirname, 'data', 'docs'), { recursive: true });
-            fs.writeFileSync(path.join(__dirname, 'data', 'docs', fileName), req.file.buffer); // off-chain
-            const db = offchain.load(); db.docs[invoiceId] = { fileName, sha256: docHash }; offchain.save(db);
+        const files = req.files || {};
+
+        // Hash every attached document up front — the hashes go ON-CHAIN (as a
+        // JSON string). We keep the buffers and only WRITE them off-chain AFTER
+        // the ledger accepts the registration, so a rejection leaves no orphans.
+        const docHashes = {};
+        const pending = [];   // { type, fileName, sha256, buffer }
+        for (const type of REGISTER_DOCS) {
+            const f = files[type] && files[type][0];
+            if (!f) continue;
+            const sha256 = crypto.createHash('sha256').update(f.buffer).digest('hex');
+            const fileName = `${invoiceId}-${type}-${f.originalname}`;
+            docHashes[type] = sha256;
+            pending.push({ type, fileName, sha256, buffer: f.buffer });
         }
+
         const ledger = await getLedger();
         const result = await ledger.submit('RegisterInvoice',
             invoiceId, b.invoiceNumber, req.user.displayName, req.user.vrn,
-            b.payerName, String(b.amount), b.currency || 'INR', b.dueDate, docHash);
+            b.payerName, String(b.amount), String(b.requestedAmount),
+            b.currency || 'INR', b.invoiceDate || '', b.dueDate,
+            JSON.stringify(docHashes));
+
+        // Ledger accepted — now persist the off-chain artefacts.
+        const db = offchain.load();
+        if (pending.length) {
+            fs.mkdirSync(path.join(__dirname, 'data', 'docs'), { recursive: true });
+            const docRecord = {};
+            for (const p of pending) {
+                fs.writeFileSync(path.join(__dirname, 'data', 'docs', p.fileName), p.buffer);
+                docRecord[p.type] = { fileName: p.fileName, sha256: p.sha256 };
+            }
+            db.docs[invoiceId] = docRecord;
+        }
+        // Goods description is commercial narrative — off-chain only, never on-chain.
+        if (b.goodsDescription && String(b.goodsDescription).trim()) {
+            db.goodsDescriptions = db.goodsDescriptions || {};
+            db.goodsDescriptions[invoiceId] = String(b.goodsDescription);
+        }
+        offchain.save(db);
+
         res.json(JSON.parse(result));
     } catch (e) { next(new ApiError(409, 'LEDGER_REJECTED', e.message)); }
 });
@@ -118,7 +151,7 @@ app.post('/invoices/:id/decline', auth('lender'), async (req, res, next) => {
         const inv = JSON.parse(await ledger.submit('DeclineInvoice', req.params.id, req.user.displayName, reason));
         const all = JSON.parse(await ledger.evaluate('GetAllInvoices'));
         const db = offchain.load();
-        res.json(maskForRole(riskScore(inv, all), db.supplierProfiles[inv.supplierVRN], req.user.role, req.user.displayName));
+        res.json(maskForRole(riskScore(inv, all, db.payerProfiles[inv.payerName]), db.supplierProfiles[inv.supplierVRN], db.payerProfiles[inv.payerName], req.user.role, req.user.displayName));
     } catch (e) { next(new ApiError(409, 'LEDGER_REJECTED', e.message)); }
 });
 
@@ -156,7 +189,7 @@ app.get('/invoices', auth(), async (req, res, next) => {
         const all = JSON.parse(await ledger.evaluate('GetAllInvoices'));
         const db = offchain.load();
         res.json(all.map(inv =>
-            maskForRole(riskScore(inv, all), db.supplierProfiles[inv.supplierVRN], req.user.role, req.user.displayName)));
+            maskForRole(riskScore(inv, all, db.payerProfiles[inv.payerName]), db.supplierProfiles[inv.supplierVRN], db.payerProfiles[inv.payerName], req.user.role, req.user.displayName)));
     } catch (e) { next(e); }
 });
 
@@ -167,7 +200,7 @@ app.get('/invoices/:id', auth(), async (req, res, next) => {
         // Similarity flags need the whole list — fine at prototype scale.
         const all = JSON.parse(await ledger.evaluate('GetAllInvoices'));
         const db = offchain.load();
-        res.json(maskForRole(riskScore(inv, all), db.supplierProfiles[inv.supplierVRN], req.user.role, req.user.displayName));
+        res.json(maskForRole(riskScore(inv, all, db.payerProfiles[inv.payerName]), db.supplierProfiles[inv.supplierVRN], db.payerProfiles[inv.payerName], req.user.role, req.user.displayName));
     } catch (e) { next(new ApiError(404, 'NOT_FOUND', e.message)); }
 });
 
@@ -180,6 +213,67 @@ app.get('/invoices/:id/history', auth(), async (req, res, next) => {
         // names for lender viewers, same rule as single-invoice reads.
         res.json(maskHistoryForRole(history, req.user.role, req.user.displayName));
     } catch (e) { next(e); }
+});
+
+/* ---- supporting documents: stream one attached file ----
+   Roles: supplier (own invoice only), payer, lender. This closes a real gap —
+   the payer is asked to approve an invoice they otherwise cannot open. ---- */
+app.get('/invoices/:id/doc/:type', auth('supplier', 'payer', 'lender'), async (req, res, next) => {
+    try {
+        const { id, type } = req.params;
+        // Whitelist the type — never interpolate a caller-supplied name into a path.
+        if (!REGISTER_DOCS.includes(type))
+            return next(new ApiError(400, 'VALIDATION_ERROR', `Unknown document type ${type}`));
+
+        const ledger = await getLedger();
+        const inv = JSON.parse(await ledger.evaluate('ReadInvoice', id));
+        if (req.user.role === 'supplier' && inv.supplierVRN !== req.user.vrn)
+            return next(new ApiError(403, 'FORBIDDEN', 'Not your invoice'));
+
+        const db = offchain.load();
+        const rec = db.docs[id] && db.docs[id][type];
+        if (!rec) return next(new ApiError(404, 'NOT_FOUND', `No ${type} on file for ${id}`));
+
+        // The stored fileName came from our own writer, but confirm it still
+        // resolves inside data/docs before streaming (defence in depth).
+        const docsDir = path.join(__dirname, 'data', 'docs');
+        const resolved = path.resolve(docsDir, rec.fileName);
+        if (!resolved.startsWith(docsDir + path.sep) || !fs.existsSync(resolved))
+            return next(new ApiError(404, 'NOT_FOUND', 'Document file missing'));
+        res.sendFile(resolved);
+    } catch (e) { next(new ApiError(404, 'NOT_FOUND', e.message)); }
+});
+
+/* ---- payment instructions: full supplier bank details, funder-only ----
+   Only the institution that actually financed this invoice may see where the
+   money goes. The 403 must NEVER name the funder — otherwise this endpoint
+   becomes an oracle leaking what lender-anonymity hides. ---- */
+app.get('/invoices/:id/payment-instructions', auth('lender'), async (req, res, next) => {
+    try {
+        const ledger = await getLedger();
+        const inv = JSON.parse(await ledger.evaluate('ReadInvoice', req.params.id));
+        // Entitlement evaluated on the RAW invoice — financedBy is never masked here.
+        const funded = inv.status === 'FINANCED' && inv.financedBy === req.user.displayName;
+        if (!funded) {
+            const suffix = inv.status === 'FINANCED'
+                ? ' — this invoice was financed by another institution.'
+                : ' — this invoice is not financed by you.';
+            return next(new ApiError(403, 'FORBIDDEN',
+                'Payment instructions are released only to the institution that financed this invoice' + suffix));
+        }
+        const db = offchain.load();
+        const sp = db.supplierProfiles[inv.supplierVRN] || {};
+        res.json({
+            invoiceId: inv.invoiceId,
+            invoiceNumber: inv.invoiceNumber,
+            beneficiary: sp.legalName || inv.supplierName,
+            bankName: sp.bankName || null,
+            bankAccount: sp.bankAccount || null,   // full, unmasked — funder entitlement
+            ifsc: sp.ifsc || null,
+            amount: inv.requestedAmount,
+            currency: inv.currency
+        });
+    } catch (e) { next(new ApiError(404, 'NOT_FOUND', e.message)); }
 });
 
 /* ---- tamper-evidence proof (mock mode: recomputes the hash chain) ---- */
@@ -228,14 +322,15 @@ async function autoSeed() {
         const supplier = users.find(u => u.username === 'supplier1');
         const payer    = users.find(u => u.username === 'payer1');
         const lender   = users.find(u => u.username === 'lloyds');
-        const reg = (id, number, amount, dueDate) => ledger.submit('RegisterInvoice',
-            id, number, supplier.displayName, supplier.vrn,
-            payer.displayName, amount, 'INR', dueDate, 'no-document');
+        const reg = (id, number, amount, requestedAmount, invoiceDate, dueDate) =>
+            ledger.submit('RegisterInvoice',
+                id, number, supplier.displayName, supplier.vrn,
+                payer.displayName, amount, requestedAmount, 'INR', invoiceDate, dueDate, '{}');
         const a = 'inv-' + Date.now(), b = 'inv-' + (Date.now() + 1);
-        await reg(a, 'INV-2026-001', '250000', '2026-08-15');
+        await reg(a, 'INV-2026-001', '250000', '225000', '2026-07-05', '2026-08-15');
         await ledger.submit('ApproveInvoice', a, payer.displayName);
         await ledger.submit('FundInvoice', a, lender.displayName);
-        await reg(b, 'INV-2026-002', '400000', '2026-09-01');
+        await reg(b, 'INV-2026-002', '400000', '380000', '2026-07-20', '2026-09-01');
         await ledger.submit('ApproveInvoice', b, payer.displayName);
         console.log('AUTO_SEED: empty ledger seeded — INV-2026-001 FINANCED, INV-2026-002 APPROVED');
     } catch (e) { console.error('AUTO_SEED failed:', e.message); }

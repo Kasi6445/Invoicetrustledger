@@ -17,19 +17,26 @@ ST=$(tok supplier1); PT=$(tok payer1); LT=$(tok lloyds); OT=$(tok otherbank)
 
 NUM="INV-2026-101-$RANDOM"
 R=$(curl -s $API/invoices -H "Authorization: Bearer $ST" -H 'Content-Type: application/json' \
-     -d "{\"invoiceNumber\":\"$NUM\",\"payerName\":\"BigRetail Ltd\",\"amount\":500000,\"currency\":\"INR\",\"dueDate\":\"2026-08-30\"}")
+     -d "{\"invoiceNumber\":\"$NUM\",\"payerName\":\"BigRetail Ltd\",\"amount\":500000,\"requestedAmount\":450000,\"currency\":\"INR\",\"dueDate\":\"2026-08-30\"}")
 ID=$(echo "$R" | sed -n 's/.*"invoiceId":"\([^"]*\)".*/\1/p')
 echo "$R" | grep -q '"status":"REGISTERED"' && ok "supplier registers → REGISTERED ($ID)" || bad "register" "$R"
 
 R=$(curl -s $API/invoices -H "Authorization: Bearer $ST" -H 'Content-Type: application/json' \
-     -d "{\"invoiceNumber\":\"$NUM\",\"payerName\":\"BigRetail Ltd\",\"amount\":750000,\"currency\":\"INR\",\"dueDate\":\"2026-08-30\"}")
+     -d "{\"invoiceNumber\":\"$NUM\",\"payerName\":\"BigRetail Ltd\",\"amount\":750000,\"requestedAmount\":700000,\"currency\":\"INR\",\"dueDate\":\"2026-08-30\"}")
 echo "$R" | grep -q "DUPLICATE INVOICE BLOCKED" && echo "$R" | grep -q "Possible tampered or fake invoice" \
   && ok "re-used number + different amount → DUPLICATE INVOICE BLOCKED + tamper note" || bad "dup number (diff amount)" "$R"
 
 R=$(curl -s $API/invoices -H "Authorization: Bearer $ST" -H 'Content-Type: application/json' \
-     -d "{\"invoiceNumber\":\"$NUM\",\"payerName\":\"BigRetail Ltd\",\"amount\":500000,\"currency\":\"INR\",\"dueDate\":\"2026-08-30\"}")
+     -d "{\"invoiceNumber\":\"$NUM\",\"payerName\":\"BigRetail Ltd\",\"amount\":500000,\"requestedAmount\":450000,\"currency\":\"INR\",\"dueDate\":\"2026-08-30\"}")
 echo "$R" | grep -q "DUPLICATE INVOICE BLOCKED" && echo "$R" | grep -qv "Possible tampered or fake invoice" \
   && ok "exact re-registration → DUPLICATE INVOICE BLOCKED (no tamper note)" || bad "dup number (same amount)" "$R"
+
+# financing cap: requestedAmount must be <= amount (face value)
+NUMCAP="INV-CAP-$RANDOM"
+R=$(curl -s $API/invoices -H "Authorization: Bearer $ST" -H 'Content-Type: application/json' \
+     -d "{\"invoiceNumber\":\"$NUMCAP\",\"payerName\":\"BigRetail Ltd\",\"amount\":500000,\"requestedAmount\":600000,\"currency\":\"INR\",\"dueDate\":\"2026-08-30\"}")
+echo "$R" | grep -q "FINANCING REQUEST REJECTED" \
+  && ok "requestedAmount > amount → FINANCING REQUEST REJECTED" || bad "financing cap" "$R"
 
 R=$(curl -s $API/invoices/$ID/fund -X POST -H "Authorization: Bearer $LT")
 echo "$R" | grep -q "Only payer-APPROVED" && ok "funding before approval is rejected" || bad "premature fund" "$R"
@@ -76,19 +83,35 @@ echo "$R" | grep -q 'REGISTERED' && echo "$R" | grep -q 'FINANCED' && echo "$R" 
   && ok "history as lloyds: full lifecycle with own name" || bad "lloyds history" "$R"
 
 R=$(curl -s $API/invoices/$ID -H "Authorization: Bearer $PT")
-echo "$R" | grep -q '••••9876' && echo "$R" | grep -qv '"risk"' \
-  && ok "payer view: bank masked to last-4, risk hidden" || bad "payer masking" "$R"
+echo "$R" | grep -q '••••9876' && echo "$R" | grep -qv '"risk"' && echo "$R" | grep -qv '"requestedAmount"' \
+  && ok "payer view: bank last-4, no risk, no requestedAmount" || bad "payer masking" "$R"
 
+# non-funding lender (OtherBank) sees the supplier's bank MASKED
+R=$(curl -s $API/invoices/$ID -H "Authorization: Bearer $OT")
+echo "$R" | grep -q '"grade"' && echo "$R" | grep -q '••••9876' && echo "$R" | grep -qv '004512349876' \
+  && ok "non-funding lender: risk grade present, bank last-4" || bad "lender masking (non-funder)" "$R"
+
+# funding lender (Lloyds financed this) — entitlement unlock reveals full bank details
 R=$(curl -s $API/invoices/$ID -H "Authorization: Bearer $LT")
-echo "$R" | grep -q '"grade"' && echo "$R" | grep -q '••••9876' \
-  && ok "lender view: risk grade present, bank last-4" || bad "lender masking" "$R"
+echo "$R" | grep -q '"grade"' && echo "$R" | grep -q '004512349876' \
+  && ok "funding lender: entitlement unlock reveals supplier bank in full" || bad "lender entitlement unlock" "$R"
+
+# payment-instructions: funder-only, and the 403 must NOT name the funder
+PI=$(curl -s -w $'\n%{http_code}' $API/invoices/$ID/payment-instructions -H "Authorization: Bearer $OT")
+PICODE=$(echo "$PI" | tail -1); PIBODY=$(echo "$PI" | sed '$d')
+[ "$PICODE" = "403" ] && echo "$PIBODY" | grep -qv "Lloyds" && echo "$PIBODY" | grep -q "another institution" \
+  && ok "payment-instructions as non-funder → 403, funder not named" || bad "payment-instructions 403" "$PICODE $PIBODY"
+
+PI=$(curl -s $API/invoices/$ID/payment-instructions -H "Authorization: Bearer $LT")
+echo "$PI" | grep -q '004512349876' && echo "$PI" | grep -q '"ifsc"' \
+  && ok "payment-instructions as funder → 200 full bank details" || bad "payment-instructions 200" "$PI"
 
 # --- similar-invoice detection (API-layer, read-time; flag, never block) ---
 SIMA="SIM-A-$RANDOM"; SIMB="SIM-B-$RANDOM"; CTRL="SIM-CTRL-$RANDOM"
 RA=$(curl -s $API/invoices -H "Authorization: Bearer $ST" -H 'Content-Type: application/json' \
-     -d "{\"invoiceNumber\":\"$SIMA\",\"payerName\":\"BigRetail Ltd\",\"amount\":314159,\"currency\":\"INR\",\"dueDate\":\"2026-08-30\"}")
+     -d "{\"invoiceNumber\":\"$SIMA\",\"payerName\":\"BigRetail Ltd\",\"amount\":314159,\"requestedAmount\":251327,\"currency\":\"INR\",\"dueDate\":\"2026-08-30\"}")
 RB=$(curl -s $API/invoices -H "Authorization: Bearer $ST" -H 'Content-Type: application/json' \
-     -d "{\"invoiceNumber\":\"$SIMB\",\"payerName\":\"BigRetail Ltd\",\"amount\":314159,\"currency\":\"INR\",\"dueDate\":\"2026-08-30\"}")
+     -d "{\"invoiceNumber\":\"$SIMB\",\"payerName\":\"BigRetail Ltd\",\"amount\":314159,\"requestedAmount\":251327,\"currency\":\"INR\",\"dueDate\":\"2026-08-30\"}")
 IDA=$(echo "$RA" | sed -n 's/.*"invoiceId":"\([^"]*\)".*/\1/p')
 IDB=$(echo "$RB" | sed -n 's/.*"invoiceId":"\([^"]*\)".*/\1/p')
 echo "$RA" | grep -q '"status":"REGISTERED"' && echo "$RB" | grep -q '"status":"REGISTERED"' \
@@ -101,7 +124,7 @@ echo "$VA" | grep -q "Similar invoice(s) on ledger" && echo "$VA" | grep -q "$SI
   && ok "lender sees soft similar flag on both, naming the twin" || bad "soft similar flag" "$VA"
 
 RC=$(curl -s $API/invoices -H "Authorization: Bearer $ST" -H 'Content-Type: application/json' \
-     -d "{\"invoiceNumber\":\"$CTRL\",\"payerName\":\"BigRetail Ltd\",\"amount\":271828,\"currency\":\"INR\",\"dueDate\":\"2026-08-30\"}")
+     -d "{\"invoiceNumber\":\"$CTRL\",\"payerName\":\"BigRetail Ltd\",\"amount\":271828,\"requestedAmount\":217462,\"currency\":\"INR\",\"dueDate\":\"2026-08-30\"}")
 IDC=$(echo "$RC" | sed -n 's/.*"invoiceId":"\([^"]*\)".*/\1/p')
 VC=$(curl -s $API/invoices/$IDC -H "Authorization: Bearer $LT")
 SC_A=$(echo "$VA" | sed -n 's/.*"score":\([0-9]*\).*/\1/p')
