@@ -10,33 +10,50 @@ bad()  { echo "❌ FAIL  $1"; echo "         got: $2"; FAIL=$((FAIL+1)); }
 tok()  { curl -s $API/auth/login -H 'Content-Type: application/json' \
            -d "{\"username\":\"$1\",\"password\":\"demo123\"}" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p'; }
 
+# The invoice copy is mandatory now, so every register is multipart. Each call gets
+# a UNIQUE tiny pdf (distinct docHash) so the similarity test below fires on the SOFT
+# "same commercials" tier (score unchanged), not the strong "same document" tier.
+# NOTE: mkdoc runs inside $(...) (a subshell), so a shared counter would never
+# persist — uniqueness comes from a nanosecond timestamp + $RANDOM per call instead.
+TMPDOCS="$(mktemp -d)"; trap 'rm -rf "$TMPDOCS"' EXIT
+mkdoc() { local u="${1:-doc}-$(date +%s%N)-$RANDOM"; local f="$TMPDOCS/$u.pdf"; \
+          printf '%%PDF-1.4 test-flow %s\n' "$u" > "$f"; printf '%s' "$f"; }
+
 echo "— Invoice Trust Ledger flow test —"
 ST=$(tok supplier1); PT=$(tok payer1); LT=$(tok lloyds); OT=$(tok otherbank)
 [ -n "$ST" ] && [ -n "$PT" ] && [ -n "$LT" ] && [ -n "$OT" ] \
   && ok "all four role logins" || { bad "logins" "empty token"; exit 1; }
 
 NUM="INV-2026-101-$RANDOM"
-R=$(curl -s $API/invoices -H "Authorization: Bearer $ST" -H 'Content-Type: application/json' \
-     -d "{\"invoiceNumber\":\"$NUM\",\"payerName\":\"BigRetail Ltd\",\"amount\":500000,\"requestedAmount\":450000,\"currency\":\"INR\",\"dueDate\":\"2026-08-30\"}")
+R=$(curl -s $API/invoices -H "Authorization: Bearer $ST" \
+     -F "invoiceCopy=@$(mkdoc);type=application/pdf" \
+     -F "invoiceNumber=$NUM" -F "payerName=BigRetail Ltd" -F amount=500000 \
+     -F requestedAmount=450000 -F currency=INR -F dueDate=2026-08-30)
 ID=$(echo "$R" | sed -n 's/.*"invoiceId":"\([^"]*\)".*/\1/p')
 echo "$R" | grep -q '"status":"REGISTERED"' && ok "supplier registers → REGISTERED ($ID)" || bad "register" "$R"
 
-R=$(curl -s $API/invoices -H "Authorization: Bearer $ST" -H 'Content-Type: application/json' \
-     -d "{\"invoiceNumber\":\"$NUM\",\"payerName\":\"BigRetail Ltd\",\"amount\":750000,\"requestedAmount\":700000,\"currency\":\"INR\",\"dueDate\":\"2026-08-30\"}")
+R=$(curl -s $API/invoices -H "Authorization: Bearer $ST" \
+     -F "invoiceCopy=@$(mkdoc);type=application/pdf" \
+     -F "invoiceNumber=$NUM" -F "payerName=BigRetail Ltd" -F amount=750000 \
+     -F requestedAmount=675000 -F currency=INR -F dueDate=2026-08-30)
 echo "$R" | grep -q "DUPLICATE INVOICE BLOCKED" && echo "$R" | grep -q "Possible tampered or fake invoice" \
   && ok "re-used number + different amount → DUPLICATE INVOICE BLOCKED + tamper note" || bad "dup number (diff amount)" "$R"
 
-R=$(curl -s $API/invoices -H "Authorization: Bearer $ST" -H 'Content-Type: application/json' \
-     -d "{\"invoiceNumber\":\"$NUM\",\"payerName\":\"BigRetail Ltd\",\"amount\":500000,\"requestedAmount\":450000,\"currency\":\"INR\",\"dueDate\":\"2026-08-30\"}")
+R=$(curl -s $API/invoices -H "Authorization: Bearer $ST" \
+     -F "invoiceCopy=@$(mkdoc);type=application/pdf" \
+     -F "invoiceNumber=$NUM" -F "payerName=BigRetail Ltd" -F amount=500000 \
+     -F requestedAmount=450000 -F currency=INR -F dueDate=2026-08-30)
 echo "$R" | grep -q "DUPLICATE INVOICE BLOCKED" && echo "$R" | grep -qv "Possible tampered or fake invoice" \
   && ok "exact re-registration → DUPLICATE INVOICE BLOCKED (no tamper note)" || bad "dup number (same amount)" "$R"
 
-# financing cap: requestedAmount must be <= amount (face value)
+# financing cap: requestedAmount must be <= 90% of amount (face value)
 NUMCAP="INV-CAP-$RANDOM"
-R=$(curl -s $API/invoices -H "Authorization: Bearer $ST" -H 'Content-Type: application/json' \
-     -d "{\"invoiceNumber\":\"$NUMCAP\",\"payerName\":\"BigRetail Ltd\",\"amount\":500000,\"requestedAmount\":600000,\"currency\":\"INR\",\"dueDate\":\"2026-08-30\"}")
+R=$(curl -s $API/invoices -H "Authorization: Bearer $ST" \
+     -F "invoiceCopy=@$(mkdoc);type=application/pdf" \
+     -F "invoiceNumber=$NUMCAP" -F "payerName=BigRetail Ltd" -F amount=500000 \
+     -F requestedAmount=600000 -F currency=INR -F dueDate=2026-08-30)
 echo "$R" | grep -q "FINANCING REQUEST REJECTED" \
-  && ok "requestedAmount > amount → FINANCING REQUEST REJECTED" || bad "financing cap" "$R"
+  && ok "requestedAmount over 90% cap → FINANCING REQUEST REJECTED" || bad "financing cap" "$R"
 
 R=$(curl -s $API/invoices/$ID/fund -X POST -H "Authorization: Bearer $LT")
 echo "$R" | grep -q "Only payer-APPROVED" && ok "funding before approval is rejected" || bad "premature fund" "$R"
@@ -108,10 +125,14 @@ echo "$PI" | grep -q '004512349876' && echo "$PI" | grep -q '"ifsc"' \
 
 # --- similar-invoice detection (API-layer, read-time; flag, never block) ---
 SIMA="SIM-A-$RANDOM"; SIMB="SIM-B-$RANDOM"; CTRL="SIM-CTRL-$RANDOM"
-RA=$(curl -s $API/invoices -H "Authorization: Bearer $ST" -H 'Content-Type: application/json' \
-     -d "{\"invoiceNumber\":\"$SIMA\",\"payerName\":\"BigRetail Ltd\",\"amount\":314159,\"requestedAmount\":251327,\"currency\":\"INR\",\"dueDate\":\"2026-08-30\"}")
-RB=$(curl -s $API/invoices -H "Authorization: Bearer $ST" -H 'Content-Type: application/json' \
-     -d "{\"invoiceNumber\":\"$SIMB\",\"payerName\":\"BigRetail Ltd\",\"amount\":314159,\"requestedAmount\":251327,\"currency\":\"INR\",\"dueDate\":\"2026-08-30\"}")
+RA=$(curl -s $API/invoices -H "Authorization: Bearer $ST" \
+     -F "invoiceCopy=@$(mkdoc);type=application/pdf" \
+     -F "invoiceNumber=$SIMA" -F "payerName=BigRetail Ltd" -F amount=314159 \
+     -F requestedAmount=251327 -F currency=INR -F dueDate=2026-08-30)
+RB=$(curl -s $API/invoices -H "Authorization: Bearer $ST" \
+     -F "invoiceCopy=@$(mkdoc);type=application/pdf" \
+     -F "invoiceNumber=$SIMB" -F "payerName=BigRetail Ltd" -F amount=314159 \
+     -F requestedAmount=251327 -F currency=INR -F dueDate=2026-08-30)
 IDA=$(echo "$RA" | sed -n 's/.*"invoiceId":"\([^"]*\)".*/\1/p')
 IDB=$(echo "$RB" | sed -n 's/.*"invoiceId":"\([^"]*\)".*/\1/p')
 echo "$RA" | grep -q '"status":"REGISTERED"' && echo "$RB" | grep -q '"status":"REGISTERED"' \
@@ -123,8 +144,10 @@ echo "$VA" | grep -q "Similar invoice(s) on ledger" && echo "$VA" | grep -q "$SI
   && echo "$VB" | grep -q "Similar invoice(s) on ledger" && echo "$VB" | grep -q "$SIMA" \
   && ok "lender sees soft similar flag on both, naming the twin" || bad "soft similar flag" "$VA"
 
-RC=$(curl -s $API/invoices -H "Authorization: Bearer $ST" -H 'Content-Type: application/json' \
-     -d "{\"invoiceNumber\":\"$CTRL\",\"payerName\":\"BigRetail Ltd\",\"amount\":271828,\"requestedAmount\":217462,\"currency\":\"INR\",\"dueDate\":\"2026-08-30\"}")
+RC=$(curl -s $API/invoices -H "Authorization: Bearer $ST" \
+     -F "invoiceCopy=@$(mkdoc);type=application/pdf" \
+     -F "invoiceNumber=$CTRL" -F "payerName=BigRetail Ltd" -F amount=271828 \
+     -F requestedAmount=217462 -F currency=INR -F dueDate=2026-08-30)
 IDC=$(echo "$RC" | sed -n 's/.*"invoiceId":"\([^"]*\)".*/\1/p')
 VC=$(curl -s $API/invoices/$IDC -H "Authorization: Bearer $LT")
 SC_A=$(echo "$VA" | sed -n 's/.*"score":\([0-9]*\).*/\1/p')

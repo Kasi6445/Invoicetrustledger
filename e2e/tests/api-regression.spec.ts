@@ -14,7 +14,8 @@ import { test, expect, APIRequestContext } from '@playwright/test';
  *                                   competitor's name masked for the losing lender)
  *
  * Repeatable: every run uses fresh unique invoice numbers.
- * Zero Gemini calls: registrations here are JSON-only (no /ai/extract).
+ * Zero Gemini calls: registrations attach a tiny synthetic PDF (multipart, since
+ * the invoice copy is mandatory) but never call /ai/extract.
  * ============================================================================
  */
 
@@ -45,11 +46,25 @@ const registerBody = (invoiceNumber: string, amount = 500000) => ({
   invoiceNumber,
   payerName: 'BigRetail Ltd',
   amount,
-  requestedAmount: Math.round(amount * 0.9),   // CR01: advance <= face value
+  requestedAmount: Math.round(amount * 0.9),   // CR01: advance <= 90% of face value
   currency: 'INR',
   invoiceDate: '2026-07-01',
   dueDate: '2026-08-30',
 });
+
+// The invoice copy is mandatory, so every register goes as multipart with an
+// attached document. Each file gets UNIQUE bytes (distinct docHash) so these
+// tests never trip the read-time "similar invoice" flag. `docTag` must be unique.
+const pdf = (docTag: string) => ({
+  name: `${docTag}.pdf`, mimeType: 'application/pdf', buffer: Buffer.from(`api-doc-${docTag}`),
+});
+async function register(
+  request: APIRequestContext, token: string, body: Record<string, any>, docTag: string,
+) {
+  const multipart: Record<string, any> = { invoiceCopy: pdf(docTag) };
+  for (const [k, v] of Object.entries(body)) multipart[k] = String(v);
+  return request.post('/invoices', { headers: auth(token), multipart });
+}
 
 test.describe.configure({ mode: 'serial' });
 
@@ -70,10 +85,7 @@ test.describe('Invoice Trust Ledger — API business rules', () => {
   });
 
   test('STEP 1 — supplier registers: REGISTERED, correct shape', async ({ request }) => {
-    const r = await request.post('/invoices', {
-      headers: auth(t.supplier),
-      data: registerBody(INV_A),
-    });
+    const r = await register(request, t.supplier, registerBody(INV_A), `${INV_A}-1`);
     expect(r.status()).toBe(200);
     const inv = await r.json();
     invoiceId = inv.invoiceId;
@@ -86,19 +98,13 @@ test.describe('Invoice Trust Ledger — API business rules', () => {
   });
 
   test('RULE — re-using an invoice number is BLOCKED by the ledger', async ({ request }) => {
-    const exact = await request.post('/invoices', {
-      headers: auth(t.supplier),
-      data: registerBody(INV_A), // identical resubmission
-    });
+    const exact = await register(request, t.supplier, registerBody(INV_A), `${INV_A}-dup`); // identical resubmission
     expect(exact.status()).toBe(409);
     const exactErr = (await exact.json()).error;
     expect(exactErr).toMatch(/DUPLICATE INVOICE BLOCKED/i);
     expect(exactErr).not.toMatch(/tampered or fake/i); // same amount: no tamper note
 
-    const altered = await request.post('/invoices', {
-      headers: auth(t.supplier),
-      data: registerBody(INV_A, 750000), // same number, inflated amount
-    });
+    const altered = await register(request, t.supplier, registerBody(INV_A, 750000), `${INV_A}-tamper`); // same number, inflated amount
     expect(altered.status()).toBe(409);
     const alteredErr = (await altered.json()).error;
     expect(alteredErr).toMatch(/DUPLICATE INVOICE BLOCKED/i);
@@ -113,10 +119,7 @@ test.describe('Invoice Trust Ledger — API business rules', () => {
   });
 
   test('RULE — funding before approval is rejected', async ({ request }) => {
-    const reg = await request.post('/invoices', {
-      headers: auth(t.supplier),
-      data: registerBody(INV_B, 400000),
-    });
+    const reg = await register(request, t.supplier, registerBody(INV_B, 400000), `${INV_B}-1`);
     const idB = (await reg.json()).invoiceId;
 
     const r = await request.post(`/invoices/${idB}/fund`, { headers: auth(t.lloyds) });
@@ -124,13 +127,23 @@ test.describe('Invoice Trust Ledger — API business rules', () => {
     expect((await r.json()).error).toMatch(/Only payer-APPROVED invoices/i);
   });
 
-  test('RULE (CR01) — requestedAmount > amount is rejected by the ledger', async ({ request }) => {
-    const r = await request.post('/invoices', {
-      headers: auth(t.supplier),
-      data: { ...registerBody(`INV-API-${RUN}-CAP`, 500000), requestedAmount: 600000 },
-    });
+  test('RULE (CR01) — requestedAmount over the cap is rejected by the ledger', async ({ request }) => {
+    const r = await register(request, t.supplier,
+      { ...registerBody(`INV-API-${RUN}-CAP`, 500000), requestedAmount: 600000 }, `${RUN}-CAP`);
     expect(r.status()).toBe(409);
     expect((await r.json()).error).toMatch(/FINANCING REQUEST REJECTED/i);
+  });
+
+  test('RULE (hardening) — register with no invoice copy is rejected 400', async ({ request }) => {
+    // JSON body => multer sees no multipart => no file => API fast-fail before the ledger.
+    const r = await request.post('/invoices', {
+      headers: auth(t.supplier),
+      data: registerBody(`INV-API-${RUN}-NODOC`),
+    });
+    expect(r.status()).toBe(400);
+    const body = await r.json();
+    expect(body.code).toBe('VALIDATION_ERROR');
+    expect(JSON.stringify(body)).toMatch(/invoice copy/i);
   });
 
   test('STEP 2 — payer approves: APPROVED; re-approval rejected', async ({ request }) => {

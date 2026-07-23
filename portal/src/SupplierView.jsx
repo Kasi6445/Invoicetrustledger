@@ -71,7 +71,8 @@ export default function SupplierView({ me }) {
   }
 
   const mine = invoices.filter(i => i.supplierVRN === me.vrn);
-  const canSubmit = !busy && fields.invoiceNumber && fields.amount && fields.requestedAmount && !requestedTooHigh;
+  const canSubmit = !busy && fields.invoiceNumber && fields.amount && fields.requestedAmount
+    && files.invoiceCopy && !requestedTooHigh;
 
   return (
     <div>
@@ -117,8 +118,9 @@ export default function SupplierView({ me }) {
                  onChange={e => set('goodsDescription', e.target.value)} /></label>
 
         <div className="formgrid" style={{ marginTop: 12 }}>
-          <label className="f"><span>Invoice copy {files.invoiceCopy ? '✓' : '(drives OCR above)'}</span>
-            <input type="file" accept=".pdf,image/*"
+          <label className="f"><span>Invoice copy {files.invoiceCopy
+              ? '✓' : <span style={{ color: 'var(--red)' }}>* required — drives OCR</span>}</span>
+            <input type="file" accept=".pdf,image/*" required
                    onChange={e => onInvoiceCopy(e.target.files[0] || null)} /></label>
           <label className="f"><span>Purchase order {files.purchaseOrder ? '✓' : '(optional)'}</span>
             <input type="file" accept=".pdf,image/*"

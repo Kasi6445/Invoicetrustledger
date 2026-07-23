@@ -8,6 +8,12 @@ function validateRegister(req, res, next) {
     const b = req.body || {};
     const fields = {};
 
+    // The invoice copy is mandatory (multer has already run, so req.files is
+    // populated). PO / goods-received note stay optional. The ledger enforces
+    // this too — this is the fast-fail so the request never reaches it.
+    if (!(req.files && req.files.invoiceCopy && req.files.invoiceCopy[0]))
+        fields.invoiceCopy = 'an invoice copy (PDF, PNG or JPG) is required';
+
     if (!b.invoiceNumber || !String(b.invoiceNumber).trim())
         fields.invoiceNumber = 'invoiceNumber is required';
 

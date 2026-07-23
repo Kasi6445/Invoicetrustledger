@@ -330,15 +330,20 @@ async function autoSeed() {
         const supplier = users.find(u => u.username === 'supplier1');
         const payer    = users.find(u => u.username === 'payer1');
         const lender   = users.find(u => u.username === 'lloyds');
-        const reg = (id, number, amount, requestedAmount, invoiceDate, dueDate) =>
-            ledger.submit('RegisterInvoice',
+        // The invoice copy is mandatory, so pass a real (unique, deterministic)
+        // docHash per invoice number. requestedAmount stays within the 90% cap.
+        const reg = (id, number, amount, requestedAmount, invoiceDate, dueDate) => {
+            const docHash = crypto.createHash('sha256').update('seed-doc-' + number).digest('hex');
+            return ledger.submit('RegisterInvoice',
                 id, number, supplier.displayName, supplier.vrn,
-                payer.displayName, amount, requestedAmount, 'INR', invoiceDate, dueDate, '{}');
+                payer.displayName, amount, requestedAmount, 'INR', invoiceDate, dueDate,
+                JSON.stringify({ invoiceCopy: docHash }));
+        };
         const a = 'inv-' + Date.now(), b = 'inv-' + (Date.now() + 1);
         await reg(a, 'INV-2026-001', '250000', '225000', '2026-07-05', '2026-08-15');
         await ledger.submit('ApproveInvoice', a, payer.displayName);
         await ledger.submit('FundInvoice', a, lender.displayName);
-        await reg(b, 'INV-2026-002', '400000', '380000', '2026-07-20', '2026-09-01');
+        await reg(b, 'INV-2026-002', '400000', '360000', '2026-07-20', '2026-09-01');
         await ledger.submit('ApproveInvoice', b, payer.displayName);
         console.log('AUTO_SEED: empty ledger seeded — INV-2026-001 FINANCED, INV-2026-002 APPROVED');
     } catch (e) { console.error('AUTO_SEED failed:', e.message); }

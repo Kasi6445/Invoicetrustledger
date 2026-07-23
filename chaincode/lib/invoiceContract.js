@@ -110,9 +110,17 @@ class InvoiceContract extends Contract {
         }
 
         const now = this._txTime(ctx);
-        // Keep docHash === the invoice-copy hash so risk.js and the demo script
-        // (which read docHash) keep working unchanged.
-        const docHash = docs.invoiceCopy || 'no-document';
+        // The invoice copy is MANDATORY: an invoice may never reach the ledger
+        // without a real document hash anchoring it. (Purchase order / goods-received
+        // note remain optional.) docHash === the invoice-copy hash so risk.js and
+        // the demo script (which read docHash) keep working unchanged.
+        if (!docs.invoiceCopy) {
+            throw new Error(
+                'INVOICE COPY REQUIRED: an invoice cannot be registered without its ' +
+                'document hash. Attach the invoice copy and try again.'
+            );
+        }
+        const docHash = docs.invoiceCopy;
         const invoice = {
             docType: 'invoice',
             invoiceId, invoiceNumber, supplierName, supplierVRN, payerName,

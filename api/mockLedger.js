@@ -102,8 +102,15 @@ module.exports = function mockLedger() {
                 }
             }
 
+            // The invoice copy is MANDATORY: no invoice may reach the ledger without
+            // a real document hash. (PO / goods-received note stay optional.)
             // docHash === the invoice-copy hash so risk.js/demo read it unchanged.
-            const docHash = docs.invoiceCopy || 'no-document';
+            if (!docs.invoiceCopy) {
+                throw new Error(
+                    'INVOICE COPY REQUIRED: an invoice cannot be registered without its ' +
+                    'document hash. Attach the invoice copy and try again.');
+            }
+            const docHash = docs.invoiceCopy;
             const inv = {
                 docType: 'invoice',
                 invoiceId, invoiceNumber, supplierName, supplierVRN, payerName,
