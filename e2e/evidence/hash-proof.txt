@@ -1,13 +1,13 @@
-Cryptographic doc-integrity proof — run 2026-07-23T08:24:36.380Z
+Cryptographic doc-integrity proof — run 2026-07-23T11:31:33.461Z
 ======================================================================
 
 invoice-clean-INV-2026-014.pdf
   sha256(file) = 6b97d18a892e1a35c88916e2bb9c14109cef46fd2d94d5ff2e49ab7fc38ea894
-  docHash on-chain (inv-1784795082495) = 6b97d18a892e1a35c88916e2bb9c14109cef46fd2d94d5ff2e49ab7fc38ea894
+  docHash on-chain (inv-1784806294706) = 6b97d18a892e1a35c88916e2bb9c14109cef46fd2d94d5ff2e49ab7fc38ea894
   MATCH: YES
 
 invoice-clean-INV-2026-007.pdf
   sha256(file) = 7551a6be169ecf24d54928636878ddbd70b6f9c684c55441c9fe7013d188c1d1
-  docHash on-chain (inv-1784795092512) = 7551a6be169ecf24d54928636878ddbd70b6f9c684c55441c9fe7013d188c1d1
+  docHash on-chain (inv-1784806299032) = 7551a6be169ecf24d54928636878ddbd70b6f9c684c55441c9fe7013d188c1d1
   MATCH: YES
 

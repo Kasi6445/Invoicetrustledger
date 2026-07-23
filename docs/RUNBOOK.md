@@ -92,7 +92,7 @@ peer chaincode invoke -o localhost:7050 --ordererTLSHostnameOverride orderer.exa
   -C mychannel -n invoicecc \
   --peerAddresses localhost:7051 --tlsRootCertFiles "${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt" \
   --peerAddresses localhost:9051 --tlsRootCertFiles "${PWD}/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt" \
-  -c '{"function":"RegisterInvoice","Args":["inv-cli-001","INV-CLI-001","Sri Lakshmi Textiles","VRN123456","BigRetail Ltd","500000","INR","2026-08-30","no-document"]}'
+  -c '{"function":"RegisterInvoice","Args":["inv-cli-001","INV-CLI-001","Sri Lakshmi Textiles","VRN123456","BigRetail Ltd","500000","450000","INR","2026-07-05","2026-08-30","{}"]}'
 
 sleep 2
 peer chaincode query -C mychannel -n invoicecc -c '{"function":"ReadInvoice","Args":["inv-cli-001"]}'
@@ -107,8 +107,10 @@ peer chaincode invoke -o localhost:7050 --ordererTLSHostnameOverride orderer.exa
   -C mychannel -n invoicecc \
   --peerAddresses localhost:7051 --tlsRootCertFiles "${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt" \
   --peerAddresses localhost:9051 --tlsRootCertFiles "${PWD}/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt" \
-  -c '{"function":"RegisterInvoice","Args":["inv-cli-002","INV-CLI-001","Sri Lakshmi Textiles","VRN123456","BigRetail Ltd","500000","INR","2026-08-30","no-document"]}'
+  -c '{"function":"RegisterInvoice","Args":["inv-cli-002","INV-CLI-001","Sri Lakshmi Textiles","VRN123456","BigRetail Ltd","500000","450000","INR","2026-07-05","2026-08-30","{}"]}'
 # → must FAIL with DUPLICATE INVOICE BLOCKED ✅
+# (11 positional args now: … amount, requestedAmount, currency, invoiceDate, dueDate, docHashes;
+#  pass {} for docHashes — nested JSON inside -c '{"Args":[…]}' is quote-hell in bash.)
 # What this proves: the same real-world invoice cannot be put on the ledger twice
 # even under a brand-new ledger key — the rule is enforced on the invoice NUMBER
 # per supplier, not merely on the storage key. That is the registration-side

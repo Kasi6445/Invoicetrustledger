@@ -1,92 +1,80 @@
 # Invoice Trust Ledger — E2E evidence index
 
-Final clean run: 2026-07-23 · **19/19 tests passed** (14 API-contract + 1 full
-UI lifecycle + 4 real-document scenarios) against the **live Hyperledger Fabric
-network** (`LEDGER_MODE=fabric`, chaincode `invoicecc` on `mychannel`, freshly
-redeployed), under the **v3 rules**: strict single-use invoice numbers (no
-tamper flag), lender declines, lender-to-lender anonymity, and the API-side
-similar-invoice flag — see `docs/RULES.md`. The `DUPLICATE INVOICE BLOCKED`
-message now labels the internal ledger record id (`ledger record: inv-…`) so it
-can't be misread as a second invoice number.
-Full machine-readable results: `../playwright-report/` (open with `npm run report`).
+Final clean run: 2026-07-23 · **23/23 tests passed** (17 API-contract + 1 full
+UI lifecycle + 4 real-document scenarios + 1 targeted OCR test) against the
+**live Hyperledger Fabric network** (`LEDGER_MODE=fabric`, chaincode `invoicecc`
+on `mychannel`, fresh ledger). Covers the v3 rules **plus CR01** (financing cap,
+multi-document hashes, payer credit profiles, funder-only payment-instructions
+entitlement) — see `docs/RULES.md` and `docs/CHANGE-REQUEST-01.md`.
 
-## Scenario 1 — Full invoice lifecycle (unique invoice number per run)
+**Gemini is stubbed** in the whole suite (zero live quota): `/ai/extract` is
+intercepted with a fixed response. The OCR path is covered by one targeted test
+(`R8` below). Real OCR accuracy is a manual demo check.
 
-Video: `full-lifecycle.webm` — the entire flow below in one continuous recording.
+## Scenario 1 — Full invoice lifecycle (`invoice-lifecycle.spec.ts`)
 
-- `01-supplier-ocr-autofill.png` — proves Gemini OCR read the uploaded PDF
-  (`invoice-clean-INV-2026-007.pdf`) and autofilled invoice number + amount from
-  the document itself.
-- `02-supplier-registered.png` — proves the invoice landed on the Fabric ledger
-  as `REGISTERED`, with the PDF's SHA-256 anchored on-chain as `docHash`.
-- `03-payer-approved.png` — proves the payer console's Approve action moved the
-  ledger state to `APPROVED` (verified via API poll, not just UI).
-- `04-lloyds-financed.png` — proves Lloyds funded the invoice (`FINANCED`),
-  which then appears under the lender console's **Funded by me** tab with a
-  disabled `Financed by you` button, the supplier's bank account masked to
-  last-4 (`••••9876`) and an explainable ledger-derived risk grade shown.
-- `05-KILL-SHOT-duplicate-financing-blocked.png` + `otherbank-kill-shot.webm` —
-  **the kill shot**: OtherBank's console was opened while the invoice was still
-  APPROVED (fund button live — the real race window), Lloyds funded first, and
-  OtherBank's stale Fund click was rejected *by the chaincode*: red banner
-  "Ledger rejected this transaction · DUPLICATE FINANCING BLOCKED … already
-  financed by **another financial institution**" — and the word "Lloyds"
-  appears nowhere on OtherBank's screen (lender anonymity, asserted in-test).
-- `06-audit-trail-immutable-history.png` — proves the immutable history modal:
-  REGISTERED → APPROVED → FINANCED, each entry carrying a real Fabric
-  transaction id and timestamp.
-- `07-supplier-duplicate-invoice-blocked.png` — proves the single-use-number
-  rule: re-registering the same invoice number with a different amount
-  (₹7,50,000 vs ₹5,00,000) is REJECTED live at registration — red banner
-  "DUPLICATE INVOICE BLOCKED … Possible tampered or fake invoice." — and the
-  lender's All tab shows exactly one row for the number.
-- Negative assertion (in-test, no screenshot): the full bank account number
-  `004512349876` never rendered in any payer/lender view.
+Video: `full-lifecycle.webm` (main page) + `otherbank-kill-shot.webm` (the
+second lender's console). This is the backup demo video, re-recorded against the
+CR01 UI.
 
-## Scenario 2 — Real fixture PDFs, as-is (`tests/real-documents.spec.ts`)
+- `01-supplier-ocr-autofill.png` — supplier register form after uploading the
+  invoice copy (the upload anchors the on-chain docHash; form filled).
+- `02-supplier-registered.png` — REGISTERED on the Fabric ledger; docHash =
+  SHA-256 of the invoice copy; `requestedAmount` persisted.
+- `03-payer-approved.png` — payer console Approve → APPROVED (API-verified).
+- `04-lloyds-financed.png` — Lloyds funded → FINANCED; the invoice moves to the
+  **Funded by me** tab with a disabled `Financed by you` button.
+- `05-lloyds-payment-instructions.png` — **CR01 entitlement unlock**: the funder
+  (Lloyds) opens the Payment instructions modal and sees the supplier's FULL
+  bank account + IFSC. No other lender can.
+- `06-KILL-SHOT-duplicate-financing-blocked.png` — **the kill shot**: OtherBank
+  (non-funder, still sees the bank MASKED to `••••9876`) clicks its stale Fund
+  button and the chaincode rejects it: red banner "LEDGER REJECTED THIS
+  TRANSACTION · DUPLICATE FINANCING BLOCKED … another financial institution".
+  "Lloyds" appears nowhere on OtherBank's screen (asserted).
+- `07-audit-trail-immutable-history.png` — immutable history REGISTERED →
+  APPROVED → FINANCED, each with a real Fabric txId + timestamp.
+- `08-supplier-duplicate-invoice-blocked.png` — re-registering the same number
+  with a different amount is REJECTED live: "DUPLICATE INVOICE BLOCKED …
+  Possible tampered or fake invoice."
+- Negative (in-test, no shot): the PAYER (never entitled) never sees the full
+  bank account.
 
-- `R1-ocr-second-layout-INV-2026-014.png` — proves OCR generalizes to a
-  second, differently-designed invoice layout (INV-2026-014, ₹3,25,000), and
-  that the ledger anchored **exactly** the SHA-256 of the uploaded file (see
-  hash proof below).
-- `R2-duplicate-invoice-blocked-real-pdf.png` — proves the ledger refuses a
-  second registration of the real INV-2026-007 PDF's invoice number
-  ("DUPLICATE INVOICE BLOCKED" on screen), and that exactly ONE registration
-  of that number exists on the ledger — ever.
-- `R3-tampered-pdf-ocr-inflated-amount.png` — proves OCR read the TAMPERED twin
-  PDF (same invoice number, amount inflated to ₹7,50,000) faithfully.
-- `R4-supplier-tampered-resubmission-blocked.png` — proves the tampered
-  resubmission is REJECTED at registration under the single-use rule, with the
-  "Possible tampered or fake invoice." warning in the ledger's own message.
-- `R5-lender-sees-no-tampered-row.png` — proves the lender console (All tab)
-  never shows a ₹7,50,000 row for INV-2026-007: the fake never reached the
-  ledger at all.
-- `R6-same-pdf-new-number-registered.png` — R4 scenario: the number-reuse
-  workaround. The SAME PDF is registered under a NEW invoice number and
-  SUCCEEDS (different numbers are never blocked — recurring billing is
-  legitimate). Registration is allowed; the net is the read-time flag below.
-- `R7-lender-similar-flag-same-document.png` — proves the strong similar-invoice
-  flag: because the two registrations share an identical `docHash`, the lender
-  row carries the amber ⚠ similar chip and the expanded risk grade reads
-  "Same document already registered as … — possible re-numbered resubmission
-  (−25)", naming the twin invoice number. Detection in the system; the funding
-  decision (Decline) stays with the institution.
+## Scenario 2 — Real fixture PDFs (`real-documents.spec.ts`)
+
+Forms filled manually (Gemini stubbed); the uploaded file still drives the real
+docHash.
+
+- `R1-ocr-second-layout-INV-2026-014.png` — a differently-designed invoice
+  (INV-2026-014) registers; on-chain docHash === sha256 of the file (hash proof).
+- `R2-duplicate-invoice-blocked-real-pdf.png` — the real INV-2026-007 registered
+  twice → the ledger blocks the second registration of the number.
+- `R3-tampered-pdf-ocr-inflated-amount.png` — the tampered twin (₹7,50,000, same
+  number) at registration.
+- `R4-supplier-tampered-resubmission-blocked.png` — that tampered resubmission is
+  REJECTED ("Possible tampered or fake invoice.").
+- `R5-lender-sees-no-tampered-row.png` — the lender's All tab never shows a
+  ₹7,50,000 row for INV-2026-007 (the fake never reached the ledger).
+- `R6-same-pdf-new-number-registered.png` — the SAME PDF under a NEW number
+  registers (different numbers are legitimate).
+- `R7-lender-similar-flag-same-document.png` — but the read-time document-hash
+  match flags it: amber ⚠ similar chip + "Same document already registered …
+  (−25)" naming the twin.
+- `R8-ocr-autofill-wiring.png` — the one targeted OCR test: uploading the invoice
+  copy autofills the form from the (stubbed) extraction.
 
 ## Cryptographic doc-integrity proof (`hash-proof.txt`)
 
-sha256 of the uploaded file vs the `docHash` the chaincode anchored on-chain —
-regenerated this run, both files MATCH: YES.
+sha256(file) vs on-chain docHash for the 014 and 007 invoice copies — MATCH: YES.
 
-## Scenario 3 — API contract (`tests/api-regression.spec.ts`, no browser)
+## Scenario 3 — API contract (`api-regression.spec.ts`, no browser, zero Gemini)
 
-14 direct assertions against the running Fabric-backed API (no screenshots —
-the Playwright report is the artifact): auth (401s), REGISTERED shape,
-DUPLICATE INVOICE BLOCKED (409, with and without the tampered-or-fake note),
-role enforcement (403s), fund-before-approval rejected, APPROVED, lender
-decline (recorded, status unchanged, no double-decline, doesn't block funding),
-FINANCED, **DUPLICATE FINANCING BLOCKED** (idempotent, competitor name masked),
-lender anonymity on reads + history ("another financial institution", foreign
-decline reasons stripped, payer/supplier see real names), the soft
-similar-invoice flag (same supplier+payer+amount under different numbers →
-informational, score unchanged), immutable 3-entry history with txIds, and
-field-level RBAC masking for payer / lender / supplier.
+17 direct assertions: auth/roles, REGISTERED shape, DUPLICATE INVOICE BLOCKED
+(± tamper note), **FINANCING REQUEST REJECTED** (requestedAmount > amount),
+fund-before-approval, lender decline (no double-decline, doesn't block others),
+FINANCED, **DUPLICATE FINANCING BLOCKED** (competitor masked), lender anonymity
+on reads + history, immutable history with txIds, and CR01 masking: payer
+(no risk/requestedAmount, IFSC masked), non-funding lender (masked bank +
+"another financial institution"), funding lender (**entitlement unlock** →
+full bank), and **payment-instructions** (funder 200 / non-funder 403 that never
+names the funder).

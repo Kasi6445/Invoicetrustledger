@@ -87,7 +87,16 @@ function riskScore(inv, all = [], payerProfile = null) {
         reasons.push(`ℹ Similar invoice(s) on ledger (same supplier, payer, amount): ${sameCommercials.join(', ')} — verify not a re-numbered resubmission`);
     }
 
-    const grade = score >= 78 ? 'A' : score >= 55 ? 'B' : 'C';
+    let grade = score >= 78 ? 'A' : score >= 55 ? 'B' : 'C';
+    // Structural cap: an invoice whose payer has NO credit rating on file can
+    // never earn the top grade — capped at B independent of the score. This is
+    // why an unrated payer (e.g. MegaMart) grades B; it is a deliberate rule,
+    // not a fragile one-point margin around the A threshold.
+    const payerRated = !!(payerProfile && payerProfile.payerRating);
+    if (!payerRated && grade === 'A') {
+        grade = 'B';
+        reasons.push('⚠ Payer has no credit rating on file — capped at B');
+    }
     const risk = { score, grade, reasons };
     // Inside risk on purpose: masking already strips risk for the payer, so the
     // flag reaches lenders and the supplier only. The twin numbers named here
