@@ -127,11 +127,14 @@ test.describe('Invoice Trust Ledger — API business rules', () => {
     expect((await r.json()).error).toMatch(/Only payer-APPROVED invoices/i);
   });
 
-  test('RULE (CR01) — requestedAmount over the cap is rejected by the ledger', async ({ request }) => {
+  test('RULE (CR01) — requestedAmount over the 90% cap is rejected by the ledger', async ({ request }) => {
+    // 475000 is 95% of 500000 — allowed under the old 100% cap, rejected under 90%.
     const r = await register(request, t.supplier,
-      { ...registerBody(`INV-API-${RUN}-CAP`, 500000), requestedAmount: 600000 }, `${RUN}-CAP`);
+      { ...registerBody(`INV-API-${RUN}-CAP`, 500000), requestedAmount: 475000 }, `${RUN}-CAP`);
     expect(r.status()).toBe(409);
-    expect((await r.json()).error).toMatch(/FINANCING REQUEST REJECTED/i);
+    const body = await r.json();
+    expect(body.error).toMatch(/FINANCING REQUEST REJECTED/i);
+    expect(body.error, 'message states the 90% cap').toMatch(/90%/);
   });
 
   test('RULE (hardening) — register with no invoice copy is rejected 400', async ({ request }) => {

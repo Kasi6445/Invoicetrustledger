@@ -81,15 +81,17 @@ class InvoiceContract extends Contract {
             throw new Error(msg);
         }
 
-        // Financing cap: the requested advance can never exceed the invoice face
-        // value. This is a size bound on the single financing event — NOT partial
-        // financing; there is still exactly one FundInvoice per invoice.
+        // Financing cap: the requested advance can never exceed 90% of the invoice
+        // face value (a haircut leaves the supplier with skin in the game). This is a
+        // size bound on the single financing event — NOT partial financing; there is
+        // still exactly one FundInvoice per invoice.
         const faceAmount = Number(amount);
         const reqAmount = Number(requestedAmount);
-        if (!(faceAmount > 0) || !(reqAmount > 0) || reqAmount > faceAmount) {
+        const cap = 0.9 * faceAmount;
+        if (!(faceAmount > 0) || !(reqAmount > 0) || reqAmount > cap) {
             throw new Error(
                 `FINANCING REQUEST REJECTED: requested amount ${reqAmount} must be greater than 0 ` +
-                `and no more than the invoice face value ${faceAmount}.`
+                `and no more than 90% of the invoice face value ${faceAmount} (max ${cap}).`
             );
         }
 

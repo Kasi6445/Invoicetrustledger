@@ -28,9 +28,11 @@ export default function SupplierView({ me }) {
   // REQUEST REJECTED). This just gives immediate feedback before a round-trip.
   const amt = Number(fields.amount);
   const req = Number(fields.requestedAmount);
+  // Financing cap: advance may not exceed 90% of face value (the ledger enforces this;
+  // this is the client-side fast-fail so the form catches it before submit).
   const requestedTooHigh =
     fields.requestedAmount !== '' && fields.amount !== '' &&
-    Number.isFinite(amt) && Number.isFinite(req) && req > amt;
+    Number.isFinite(amt) && Number.isFinite(req) && req > 0.9 * amt;
 
   // Only the INVOICE COPY drives OCR. The PO and goods-received note are
   // attached as-is (no extraction).
@@ -109,7 +111,7 @@ export default function SupplierView({ me }) {
         {requestedTooHigh && (
           <p style={{ fontSize: 13, color: 'var(--red)', margin: '8px 0 0' }}>
             Financing requested ({fields.currency} {Number(fields.requestedAmount).toLocaleString('en-IN')}) cannot exceed
-            the invoice face value ({fields.currency} {Number(fields.amount).toLocaleString('en-IN')}).
+            90% of the invoice face value ({fields.currency} {Number(0.9 * amt).toLocaleString('en-IN')}).
           </p>
         )}
 

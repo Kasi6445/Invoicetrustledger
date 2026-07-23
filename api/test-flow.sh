@@ -46,13 +46,14 @@ R=$(curl -s $API/invoices -H "Authorization: Bearer $ST" \
 echo "$R" | grep -q "DUPLICATE INVOICE BLOCKED" && echo "$R" | grep -qv "Possible tampered or fake invoice" \
   && ok "exact re-registration → DUPLICATE INVOICE BLOCKED (no tamper note)" || bad "dup number (same amount)" "$R"
 
-# financing cap: requestedAmount must be <= 90% of amount (face value)
+# financing cap: requestedAmount must be <= 90% of amount (face value).
+# 475000 is 95% of 500000 — allowed under the old 100% cap, rejected under 90%.
 NUMCAP="INV-CAP-$RANDOM"
 R=$(curl -s $API/invoices -H "Authorization: Bearer $ST" \
      -F "invoiceCopy=@$(mkdoc);type=application/pdf" \
      -F "invoiceNumber=$NUMCAP" -F "payerName=BigRetail Ltd" -F amount=500000 \
-     -F requestedAmount=600000 -F currency=INR -F dueDate=2026-08-30)
-echo "$R" | grep -q "FINANCING REQUEST REJECTED" \
+     -F requestedAmount=475000 -F currency=INR -F dueDate=2026-08-30)
+echo "$R" | grep -q "FINANCING REQUEST REJECTED" && echo "$R" | grep -q "90%" \
   && ok "requestedAmount over 90% cap → FINANCING REQUEST REJECTED" || bad "financing cap" "$R"
 
 R=$(curl -s $API/invoices/$ID/fund -X POST -H "Authorization: Bearer $LT")
