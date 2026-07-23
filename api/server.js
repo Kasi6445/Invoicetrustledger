@@ -77,6 +77,14 @@ function auth(...roles) {
     };
 }
 
+// Attach the off-chain goods description (commercial narrative, not on-chain) to
+// an invoice record before scoring/masking so reads can surface it. Not sensitive
+// per role — payer approves against it, lender reads it for context.
+const withGoods = (inv, db) => {
+    inv.goodsDescription = (db.goodsDescriptions && db.goodsDescriptions[inv.invoiceId]) || null;
+    return inv;
+};
+
 /* ---- STEP 1: supplier registers (all documents optional) ---- */
 app.post('/invoices', auth('supplier'), registerUpload, validateRegister, async (req, res, next) => {
     try {
@@ -151,7 +159,7 @@ app.post('/invoices/:id/decline', auth('lender'), async (req, res, next) => {
         const inv = JSON.parse(await ledger.submit('DeclineInvoice', req.params.id, req.user.displayName, reason));
         const all = JSON.parse(await ledger.evaluate('GetAllInvoices'));
         const db = offchain.load();
-        res.json(maskForRole(riskScore(inv, all, db.payerProfiles[inv.payerName]), db.supplierProfiles[inv.supplierVRN], db.payerProfiles[inv.payerName], req.user.role, req.user.displayName));
+        res.json(maskForRole(riskScore(withGoods(inv, db), all, db.payerProfiles[inv.payerName]), db.supplierProfiles[inv.supplierVRN], db.payerProfiles[inv.payerName], req.user.role, req.user.displayName));
     } catch (e) { next(new ApiError(409, 'LEDGER_REJECTED', e.message)); }
 });
 
@@ -189,7 +197,7 @@ app.get('/invoices', auth(), async (req, res, next) => {
         const all = JSON.parse(await ledger.evaluate('GetAllInvoices'));
         const db = offchain.load();
         res.json(all.map(inv =>
-            maskForRole(riskScore(inv, all, db.payerProfiles[inv.payerName]), db.supplierProfiles[inv.supplierVRN], db.payerProfiles[inv.payerName], req.user.role, req.user.displayName)));
+            maskForRole(riskScore(withGoods(inv, db), all, db.payerProfiles[inv.payerName]), db.supplierProfiles[inv.supplierVRN], db.payerProfiles[inv.payerName], req.user.role, req.user.displayName)));
     } catch (e) { next(e); }
 });
 
@@ -200,7 +208,7 @@ app.get('/invoices/:id', auth(), async (req, res, next) => {
         // Similarity flags need the whole list — fine at prototype scale.
         const all = JSON.parse(await ledger.evaluate('GetAllInvoices'));
         const db = offchain.load();
-        res.json(maskForRole(riskScore(inv, all, db.payerProfiles[inv.payerName]), db.supplierProfiles[inv.supplierVRN], db.payerProfiles[inv.payerName], req.user.role, req.user.displayName));
+        res.json(maskForRole(riskScore(withGoods(inv, db), all, db.payerProfiles[inv.payerName]), db.supplierProfiles[inv.supplierVRN], db.payerProfiles[inv.payerName], req.user.role, req.user.displayName));
     } catch (e) { next(new ApiError(404, 'NOT_FOUND', e.message)); }
 });
 

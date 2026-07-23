@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
-import { listInvoices, approveInvoice, disputeInvoice, getHistory } from './api';
+import { listInvoices, approveInvoice, disputeInvoice, getHistory, getDoc } from './api';
 import AuditTrail from './AuditTrail';
+
+const DOC_LABELS = { invoiceCopy: 'Invoice copy', purchaseOrder: 'Purchase order', goodsReceived: 'Goods-received note' };
 
 export default function PayerView({ me }) {
   const [invoices, setInvoices] = useState([]);
@@ -24,6 +26,32 @@ export default function PayerView({ me }) {
     } finally { setBusy(false); }
   }
 
+  async function openDoc(id, type) {
+    try {
+      const url = await getDoc(id, type);
+      window.open(url, '_blank', 'noopener');
+    } catch (e) {
+      setMsg({ ok: false, text: 'Could not open document: ' + (e.response?.data?.error || e.message) });
+    }
+  }
+
+  // Goods narrative + buttons for whichever supporting documents are attached.
+  function GoodsAndDocs({ inv }) {
+    const attached = Object.keys(inv.docs || {}).filter(t => inv.docs[t] && DOC_LABELS[t]);
+    return (
+      <div>
+        <div>{inv.goodsDescription || <span className="sub">No goods description provided</span>}</div>
+        <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {attached.length === 0 && <span className="sub">No documents attached</span>}
+          {attached.map(t => (
+            <button key={t} className="btn" style={{ padding: '4px 10px', fontSize: 12 }}
+                    onClick={() => openDoc(inv.invoiceId, t)}>📎 {DOC_LABELS[t]}</button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   const pending = invoices.filter(i => i.status === 'REGISTERED' && i.payerName === me.displayName);
   const rest = invoices.filter(i => !(i.status === 'REGISTERED' && i.payerName === me.displayName));
 
@@ -39,15 +67,16 @@ export default function PayerView({ me }) {
       <p className="eyebrow">Step 2 · Awaiting your confirmation</p>
       <div className="card">
         <table>
-          <thead><tr><th>Invoice</th><th>Supplier</th><th>Amount</th><th>Due</th><th></th></tr></thead>
+          <thead><tr><th>Invoice</th><th>Supplier</th><th>Amount</th><th>Goods &amp; documents</th><th>Due</th><th></th></tr></thead>
           <tbody>
-            {pending.length === 0 && <tr><td colSpan="5" className="sub">Nothing waiting for approval.</td></tr>}
+            {pending.length === 0 && <tr><td colSpan="6" className="sub">Nothing waiting for approval.</td></tr>}
             {pending.map(inv => (
               <tr key={inv.invoiceId}>
                 <td>{inv.invoiceNumber}<div className="sub">{inv.invoiceId}</div></td>
                 <td>{inv.supplierName}
-                  <div className="sub">a/c {inv.supplierProfile?.bankAccount || '—'} · sort {inv.supplierProfile?.sortCode || '—'}</div></td>
+                  <div className="sub">a/c {inv.supplierProfile?.bankAccount || '—'} · IFSC {inv.supplierProfile?.ifsc || '—'}</div></td>
                 <td className="amount">{inv.currency} {Number(inv.amount).toLocaleString('en-IN')}</td>
+                <td style={{ maxWidth: 260 }}><GoodsAndDocs inv={inv} /></td>
                 <td className="sub">{inv.dueDate}</td>
                 <td style={{ whiteSpace: 'nowrap' }}>
                   <button className="btn primary" disabled={busy} onClick={() => act(approveInvoice, inv.invoiceId)}>{busy ? 'Working…' : 'Approve'}</button>{' '}
@@ -59,7 +88,7 @@ export default function PayerView({ me }) {
           </tbody>
         </table>
         <p className="sub" style={{ marginBottom: 0 }}>
-          Field-level access: you see the commercial record; the supplier's bank account is masked to last-4 and lender risk data is not shown to you.
+          Field-level access: you see the commercial record and can open every supporting document; the supplier's bank account is masked to last-4, IFSC masked, and lender risk/financing data is not shown to you.
         </p>
       </div>
 

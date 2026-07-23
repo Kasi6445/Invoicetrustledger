@@ -158,6 +158,28 @@ Pre-walk-in checklist: network up (fabric mode) · API running · seeded · port
 
 ---
 
+## Redeploying chaincode after a code change (e.g. CR01)
+
+Any edit to `chaincode/lib/invoiceContract.js` must be pushed to the peers, and
+the `mockLedger` in `api/mockLedger.js` must carry the identical rule change.
+
+- **Clean-slate (what we do for the demo):** `./network.sh down` then `up createChannel`
+  then `deployCC` — a fresh channel starts at version 1 / sequence 1, so no
+  `-ccv/-ccs` needed. The ledger is wiped, so re-run `seed.js`.
+- **In-place upgrade (no teardown):** increment BOTH the version and the sequence
+  each time, e.g. `./network.sh deployCC -ccn invoicecc -ccp ~/invoice-trust-ledger/chaincode -ccl javascript -ccv 2 -ccs 2`
+  (next time `-ccv 3 -ccs 3`). Check the committed sequence first with
+  `peer lifecycle chaincode querycommitted -C mychannel -n invoicecc`.
+- **ALWAYS restart the API after any network down/up** (`node server.js`): the
+  Fabric crypto material (certs) is regenerated on a fresh network, so a gateway
+  connection opened against the old certs fails — and it surfaces as a confusing
+  "endorsement failure", not an obvious auth error.
+
+CR01 note: `RegisterInvoice` now takes 11 positional args
+(`… amount, requestedAmount, currency, invoiceDate, dueDate, docHashes`). For a
+bash/CLI smoke test pass `{}` as the final `docHashes` arg — nested JSON inside
+`-c '{"Args":[...]}'` is quote-hell in bash.
+
 ## LATER — The GCUL swap (when Google grants access)
 
 1. Port the rules in `docs/RULES.md` to a GCUL Python smart contract (they are written language-neutrally for exactly this).

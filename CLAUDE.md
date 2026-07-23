@@ -37,7 +37,7 @@ docs/        RULES.md (portable contract spec) · ARCHITECTURE.md (layers + requ
 # API (from api/)
 cp .env.example .env && npm install   # then set a real JWT_SECRET in .env (see comment there)
 node server.js                 # start on :3000, leave running
-bash test-flow.sh               # conformance suite — must print "22 passed, 0 failed"
+bash test-flow.sh               # conformance suite — must print "26 passed, 0 failed"
 bash regression.sh              # test-flow PLUS hardening checks (401/400/403, upload limits)
 node seed.js                    # demo data: one FINANCED invoice, one APPROVED-and-ready invoice
 rm -rf data                     # reset mock-mode ledger state (stop server first)
@@ -108,7 +108,7 @@ Fabric state does NOT persist across `network.sh down` — the ledger is wiped, 
 There is no unit test framework. Two layers exist, both run against a live server:
 
 1. `api/test-flow.sh` (curl) is the conformance test for the whole system, and it must pass
-   identically against every ledger backend. It's one linear script of 22 checks. `api/regression.sh`
+   identically against every ledger backend. It's one linear script of 26 checks. `api/regression.sh`
    wraps it and adds API-hardening checks (wrong password → 401, missing fields → 400 with field
    messages, garbage token → 401, wrong role → 403, oversized/wrong-type uploads rejected). Run
    regression.sh after any change to `api/*.js` or `chaincode/lib/invoiceContract.js`.
@@ -193,17 +193,24 @@ demo path ("Plan B") if the Fabric network can't be stood up.
   rejections pass through verbatim in `error` with code `LEDGER_REJECTED` (tests grep those
   messages, don't rewrite them). Request validation for registers lives in `api/validate.js` —
   it's a shape check only; business rules stay in the ledger.
-- `api/masking.js` — field-level RBAC applied to every read response: payer never sees `risk` or
-  full bank details; lender sees risk/funding data but KYC/bank stay masked to last-4; supplier
-  sees their own record unmasked. One lender never sees another lender's name: for a lender
-  viewer, a competitor's `financedBy` and foreign `declines` entries become
+- `api/masking.js` — field-level RBAC applied to every read response, signature
+  `maskForRole(invoice, supplierProfile, payerProfile, role, viewerName)` (CR01 — every call site
+  passes `db.payerProfiles[inv.payerName]`). Payer never sees `risk`, `requestedAmount`, or full
+  bank details, and `payerProfile` is nulled (they know their own terms); lender sees risk/funding
+  data + the full `payerProfile`, with supplier `bankAccount`/`ifsc` masked UNLESS this lender
+  funded the invoice (**entitlement unlock**, evaluated on the raw invoice BEFORE anonymity so the
+  funder passes their own check); supplier sees their own record unmasked. One lender never sees
+  another lender's name: a competitor's `financedBy` and foreign `declines` entries become
   `another financial institution` (reasons stripped) — including inside `GET /invoices/:id/history`
-  (via `maskHistoryForRole`) and the fund route's 409 message. Route handlers always pipe reads
-  through `maskForRole(riskScore(inv), profile, req.user.role, req.user.displayName)` — do the
-  same for any new read endpoint. The chaincode never masks; the on-chain record stays complete.
+  (via `maskHistoryForRole`), the fund route's 409, and the `payment-instructions` 403. The
+  chaincode never masks; the on-chain record stays complete. See the role/field matrix in
+  `docs/RULES.md`. New endpoints: `GET /invoices/:id/doc/:type` (stream a supporting document;
+  whitelisted type, traversal-guarded) and `GET /invoices/:id/payment-instructions` (funder-only
+  full bank details; 403 never names the funder).
 - `api/risk.js` — deliberately rule-based (not ML) risk scoring so every point is explainable from
-  ledger state (payer approval +40, anchored doc hash +20, due-date window +15, amount band +15,
-  no lender declines +10).
+  ledger state (weights sum to 100: payer approval +35, anchored doc hash +15, due-date window +10,
+  amount band +10, no lender declines +10, plus CR01 advance-ratio up to +12 and payer
+  payment-terms up to +8). Grades A≥78 / B≥55 / C. `riskScore(inv, all, payerProfile)`.
 - `api/gemini.js` — OCR extraction for invoice uploads via Gemini REST API. Falls back to a
   labelled `simulated: true` response when `GEMINI_API_KEY` is unset or the API fails, so the demo
   never hard-fails on a missing key or dead network.

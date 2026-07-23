@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { listInvoices, fundInvoice, declineInvoice, getHistory } from './api';
+import { listInvoices, fundInvoice, declineInvoice, getHistory, getPaymentInstructions } from './api';
 import AuditTrail from './AuditTrail';
 
 export default function LenderView({ me }) {
@@ -10,6 +10,7 @@ export default function LenderView({ me }) {
   const [fundingId, setFundingId] = useState(null);   // invoice currently being funded
   const [search, setSearch] = useState('');
   const [tab, setTab] = useState('ready');
+  const [payInfo, setPayInfo] = useState(null);   // funder-only payment instructions modal
 
   const refresh = () => listInvoices().then(setInvoices).catch(() => {});
   useEffect(() => { refresh(); }, []);
@@ -60,6 +61,14 @@ export default function LenderView({ me }) {
     } finally { setFundingId(null); }
   }
 
+  // Entitlement: the API returns full supplier bank details only to the lender
+  // that financed this invoice (403 otherwise, without naming the funder).
+  async function showPayInstructions(id) {
+    setPayInfo({ loading: true });
+    try { setPayInfo(await getPaymentInstructions(id)); }
+    catch (e) { setPayInfo({ error: e.response?.data?.error || e.message }); }
+  }
+
   return (
     <div>
       <p className="eyebrow">Steps 4–5 · Verify &amp; fund</p>
@@ -95,18 +104,24 @@ export default function LenderView({ me }) {
         </div>
         <table>
           <thead>
-            <tr><th>Invoice</th><th>Supplier</th><th>Amount</th><th>Status</th><th>Risk</th><th></th></tr>
+            <tr><th>Invoice</th><th>Supplier</th><th>Amount</th><th>Payer terms</th><th>Status</th><th>Risk</th><th></th></tr>
           </thead>
           <tbody>
-            {invoices.length === 0 && <tr><td colSpan="6" className="sub">Ledger is empty — run the seed script or register an invoice as the supplier.</td></tr>}
+            {invoices.length === 0 && <tr><td colSpan="7" className="sub">Ledger is empty — run the seed script or register an invoice as the supplier.</td></tr>}
             {invoices.length > 0 && visible.length === 0 &&
-              <tr><td colSpan="6" className="sub">Nothing matches this tab{q ? ' and search' : ''} — try the All tab or clear the search.</td></tr>}
+              <tr><td colSpan="7" className="sub">Nothing matches this tab{q ? ' and search' : ''} — try the All tab or clear the search.</td></tr>}
             {visible.map(inv => (
               <tr key={inv.invoiceId}>
                 <td>{inv.invoiceNumber}<div className="sub">{inv.invoiceId}</div></td>
                 <td>{inv.supplierName}
                   <div className="sub">a/c {inv.supplierProfile?.bankAccount || '—'}</div></td>
                 <td className="amount">{inv.currency} {Number(inv.amount).toLocaleString('en-IN')}</td>
+                <td>
+                  {inv.payerProfile
+                    ? <span>{inv.payerProfile.paymentTerms || '—'}
+                        {inv.payerProfile.payerRating && <div className="sub">rating {inv.payerProfile.payerRating}</div>}</span>
+                    : <span className="sub">—</span>}
+                </td>
                 <td><span className={`badge ${inv.status}`}>{inv.status}</span></td>
                 <td>
                   {inv.risk && (
@@ -134,6 +149,10 @@ export default function LenderView({ me }) {
                     <><button className="btn danger" disabled={fundingId !== null}
                               onClick={() => decline(inv.invoiceId)}>Decline</button>{' '}</>
                   )}
+                  {fundedByMe(inv) && (
+                    <><button className="btn" disabled={fundingId !== null}
+                              onClick={() => showPayInstructions(inv.invoiceId)}>Payment instructions</button>{' '}</>
+                  )}
                   <button className="btn" disabled={fundingId !== null}
                           onClick={async () => { try { setTrail(await getHistory(inv.invoiceId)); } catch {} }}>Audit trail</button>
                 </td>
@@ -147,6 +166,31 @@ export default function LenderView({ me }) {
       </div>
 
       {trail && <AuditTrail trail={trail} onClose={() => setTrail(null)} />}
+
+      {payInfo && (
+        <div className="overlay" onClick={() => setPayInfo(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <h3>Payment instructions</h3>
+            {payInfo.loading && <p className="sub">Loading…</p>}
+            {payInfo.error && <p style={{ color: 'var(--red)' }}>{payInfo.error}</p>}
+            {!payInfo.loading && !payInfo.error && (
+              <div style={{ fontSize: 14, lineHeight: 1.9 }}>
+                <div><b>{payInfo.invoiceNumber}</b></div>
+                <div>Beneficiary: {payInfo.beneficiary}</div>
+                <div>Bank: {payInfo.bankName}</div>
+                <div>Account: {payInfo.bankAccount}</div>
+                <div>IFSC: {payInfo.ifsc}</div>
+                <div>Disburse: {payInfo.currency} {Number(payInfo.amount).toLocaleString('en-IN')}</div>
+                <p className="sub" style={{ marginTop: 10 }}>
+                  Released to you as the financing institution — the ledger gates these
+                  details so no other lender can read them.
+                </p>
+              </div>
+            )}
+            <button className="btn" onClick={() => setPayInfo(null)}>Close</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

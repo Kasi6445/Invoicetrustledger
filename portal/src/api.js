@@ -63,11 +63,20 @@ export const disputeInvoice = (id, reason) => client.post(`/invoices/${id}/dispu
 export const fundInvoice    = id => client.post(`/invoices/${id}/fund`, {}).then(r => r.data);
 export const declineInvoice = (id, reason) => client.post(`/invoices/${id}/decline`, { reason }).then(r => r.data);
 export const verifyLedger   = () => client.get('/ledger/verify').then(r => r.data);
+export const getPaymentInstructions = id => client.get(`/invoices/${id}/payment-instructions`).then(r => r.data);
 
-export function registerInvoice(fields, file) {
+// Fetch a supporting document (auth header required, so we can't just link to
+// the URL) and hand back a blob URL the caller can open in a new tab.
+export async function getDoc(id, type) {
+  const res = await client.get(`/invoices/${id}/doc/${type}`, { responseType: 'blob' });
+  return URL.createObjectURL(res.data);
+}
+
+// files: { invoiceCopy, purchaseOrder, goodsReceived } — each optional.
+export function registerInvoice(fields, files) {
   const fd = new FormData();
   Object.entries(fields).forEach(([k, v]) => fd.append(k, v));
-  if (file) fd.append('doc', file);
+  if (files) for (const [name, f] of Object.entries(files)) if (f) fd.append(name, f);
   return client.post('/invoices', fd).then(r => r.data);
 }
 export function aiExtract(file) {
