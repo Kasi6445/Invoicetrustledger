@@ -105,6 +105,36 @@ export default function LenderView({ me }) {
             );
           })}
         </div>
+        <details className="legend">
+          <summary>How the risk grade is calculated</summary>
+          <div className="legend-body">
+            <p className="sub" style={{ marginTop: 0 }}>
+              Rule-based and fully explainable — no black box. Every point maps to a fact on the
+              ledger, so any grade can be defended line by line. Score is out of 100:
+              &nbsp;<span className="grade A">A</span>&nbsp;≥&nbsp;78&nbsp;·&nbsp;
+              <span className="grade B">B</span>&nbsp;≥&nbsp;55&nbsp;·&nbsp;
+              <span className="grade C">C</span>&nbsp;below.
+            </p>
+            <table className="legend-table">
+              <thead><tr><th>Signal</th><th>Max</th><th>Where it comes from</th></tr></thead>
+              <tbody>
+                <tr><td>Payer approved</td><td>+35</td><td>on-chain status</td></tr>
+                <tr><td>Document hash anchored</td><td>+15</td><td>SHA-256 on-chain</td></tr>
+                <tr><td>Due date in 7–180 day window</td><td>+10</td><td>invoice terms</td></tr>
+                <tr><td>Amount in routine band (≤ £1M)</td><td>+10</td><td>face value</td></tr>
+                <tr><td>No lender declines</td><td>+10</td><td>ledger declines</td></tr>
+                <tr><td>Conservative advance (≤ 90% of face)</td><td>+12</td><td>requested vs face</td></tr>
+                <tr><td>Short payer terms (≤ 30 days)</td><td>+8</td><td>payer credit profile</td></tr>
+              </tbody>
+            </table>
+            <p className="sub" style={{ marginBottom: 0 }}>
+              <b>Adjustments.</b> −25 if the same document is already registered under a different
+              number (a re-numbered resubmission). <b>Structural cap:</b> a payer with no credit
+              rating on file can never grade above <span className="grade B">B</span>, whatever the
+              score — a deliberate rule, not a one-point margin.
+            </p>
+          </div>
+        </details>
         <table>
           <thead>
             <tr><th>Invoice</th><th>Supplier</th><th>Amount</th><th>Payer terms</th><th>Status</th><th>Risk</th><th></th></tr>
