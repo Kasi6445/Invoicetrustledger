@@ -228,6 +228,11 @@ demo path ("Plan B") if the Fabric network can't be stood up.
 - `api/gemini.js` — OCR extraction for invoice uploads via Gemini REST API. Falls back to a
   labelled `simulated: true` response when `GEMINI_API_KEY` is unset or the API fails, so the demo
   never hard-fails on a missing key or dead network.
+- `api/companiesHouse.js` — `lookupCompany(crn)` checks a supplier's Companies House registration.
+  Same fail-safe shape as gemini.js: a live register call only when `CH_API_KEY` is set (behind a
+  2.5s timeout), otherwise — or on any timeout/error — a labelled cached snapshot (`source:
+  'cached'`). It NEVER throws. Exposed at `GET /invoices/:id/supplier-check` (lender + supplier own)
+  and surfaced as the lender's **Companies House** button.
 - `api/users.js` — hardcoded demo accounts (all password `demo123`): `supplier1`, `payer1`,
   `lloyds` and `otherbank` (two lenders on purpose — `otherbank` is the second-financing kill
   shot). Auth is plain JWT, explicitly not OIDC, for demo purposes.

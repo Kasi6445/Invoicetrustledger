@@ -182,6 +182,27 @@ test.describe('Invoice Trust Ledger — API business rules', () => {
     expect(badv.anchoredHash).toBe(okv.anchoredHash);   // ledger anchor unchanged by the tamper
   });
 
+  test('RULE (provenance) — supplier Companies House check returns a register status', async ({ request }) => {
+    const INV_CH = `INV-API-${RUN}-CH`;
+    const reg = await register(request, t.supplier, registerBody(INV_CH), `${INV_CH}-doc`);
+    expect(reg.status()).toBe(200);
+    const id = (await reg.json()).invoiceId;
+
+    const r = await request.get(`/invoices/${id}/supplier-check`, { headers: auth(t.lloyds) });
+    expect(r.status()).toBe(200);
+    const c = await r.json();
+    expect(c.crn).toBe('09876543');                    // supplier1's Companies House number
+    expect(['live', 'cached']).toContain(c.source);    // cached with no key, live when CH_API_KEY set
+    expect(typeof c.found).toBe('boolean');
+    // The built-in snapshot is deterministic; only assert its values in cached mode,
+    // so a real API key (which would resolve the live register) can't make this flaky.
+    if (c.source === 'cached') {
+      expect(c.found).toBe(true);
+      expect(c.status).toBe('active');
+      expect(c.companyName).toMatch(/Pennine/);
+    }
+  });
+
   test('STEP 2 — payer approves: APPROVED; re-approval rejected', async ({ request }) => {
     const ok = await request.post(`/invoices/${invoiceId}/approve`, { headers: auth(t.payer) });
     expect(ok.status()).toBe(200);

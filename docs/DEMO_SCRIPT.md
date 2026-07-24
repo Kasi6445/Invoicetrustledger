@@ -16,6 +16,8 @@ Setup before walking in: ledger up · API running · `node seed.js` done · port
 
    *Optional 10s beat:* as **Meridian**, Decline an APPROVED invoice ("Outside risk appetite") → as **Lloyds**, expand its risk grade: **⚠ Declined by 1 institution(s)** — the decline is shared as a signal, but the decliner's name is masked and the invoice stays fundable.
 
+   *Optional 15s beat — real-world provenance:* as **Lloyds**, click **Companies House** on the supplier's row → green **"Active company on the register,"** with the company number and incorporation date. "We key every supplier on its Companies House number and check it's a real, active company — a live call to the register when we're online, a cached snapshot when we're not, so it never stalls."
+
    *Optional 15s beat — the number-change workaround:* as **Supplier**, re-upload the original £85,000 PDF but type a NEW invoice number → it registers ("changing the number gets past the front door…") → as **Lloyds**, the row carries an amber **⚠ similar** chip and the expanded grade reads **⚠ Same document already registered as … (−25)** with a degraded grade → Lloyds clicks **Decline** citing it: "…but the identical document is flagged on sight — detection in the system, decision with the institution."
 
 7. **[40s] Close.** "The ledger sits behind a thin adapter: today Hyperledger Fabric [or: a hash-chained ledger], tomorrow Google Cloud Universal Ledger — GCUL is in private testnet, and when Google opens access it drops in behind the same interface with zero changes to what you just saw. Questions?"

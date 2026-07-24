@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { listInvoices, fundInvoice, declineInvoice, getHistory, getPaymentInstructions, verifyDoc, getDoc } from './api';
+import { listInvoices, fundInvoice, declineInvoice, getHistory, getPaymentInstructions, verifyDoc, getDoc, supplierCheck } from './api';
 import AuditTrail from './AuditTrail';
 
 const gbp = (v, currency = 'GBP') =>
@@ -15,6 +15,7 @@ export default function LenderView({ me }) {
   const [tab, setTab] = useState('ready');
   const [payInfo, setPayInfo] = useState(null);   // funder-only payment instructions modal
   const [docCheck, setDocCheck] = useState(null); // document integrity-verification modal
+  const [chCheck, setChCheck] = useState(null);   // Companies House register-check modal
 
   const refresh = () => listInvoices().then(setInvoices).catch(() => {});
   useEffect(() => { refresh(); }, []);
@@ -83,6 +84,13 @@ export default function LenderView({ me }) {
   async function openDoc(id) {
     try { window.open(await getDoc(id, 'invoiceCopy'), '_blank', 'noopener'); }
     catch (e) { setDocCheck({ error: e.response?.data?.error || e.message }); }
+  }
+
+  // Provenance beat: is the supplier a real, active company on Companies House?
+  async function checkCompany(id) {
+    setChCheck({ loading: true });
+    try { setChCheck(await supplierCheck(id)); }
+    catch (e) { setChCheck({ error: e.response?.data?.error || e.message }); }
   }
 
   return (
@@ -200,7 +208,7 @@ export default function LenderView({ me }) {
                   {inv.risk?.similar &&
                     <div className="similar" title="Similar invoice(s) on the ledger — expand the risk grade for details">⚠ similar</div>}
                 </td>
-                <td style={{ whiteSpace: 'nowrap' }}>
+                <td style={{ minWidth: 180 }}>
                   <button className={fundClass} disabled={fundDisabled}
                           onClick={() => fund(inv.invoiceId)}>{fundLabel}</button>{' '}
                   {(inv.status === 'APPROVED' || inv.status === 'REGISTERED') && (
@@ -216,6 +224,9 @@ export default function LenderView({ me }) {
                   <button className="btn" disabled={fundingId !== null}
                           onClick={() => checkDoc(inv.invoiceId)}
                           title="Recompute the document hash and check it against the ledger">Verify document</button>{' '}
+                  <button className="btn" disabled={fundingId !== null}
+                          onClick={() => checkCompany(inv.invoiceId)}
+                          title="Check the supplier's Companies House registration">Companies House</button>{' '}
                   <button className="btn" disabled={fundingId !== null}
                           onClick={async () => { try { setTrail(await getHistory(inv.invoiceId)); } catch {} }}>Audit trail</button>
                 </td>
@@ -294,6 +305,51 @@ export default function LenderView({ me }) {
               </div>
             )}
             <button className="btn" onClick={() => setDocCheck(null)}>Close</button>
+          </div>
+        </div>
+      )}
+
+      {chCheck && (
+        <div className="overlay" onClick={() => setChCheck(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <h3>Companies House check</h3>
+            {chCheck.loading && <p className="sub">Checking the register…</p>}
+            {chCheck.error && <p style={{ color: 'var(--red)' }}>{chCheck.error}</p>}
+            {!chCheck.loading && !chCheck.error && (
+              <div style={{ fontSize: 14, lineHeight: 1.7 }}>
+                {chCheck.found && chCheck.status === 'active' ? (
+                  <div className="notice-ok" style={{ marginBottom: 12 }}>
+                    ✓ Active company on the Companies House register.
+                  </div>
+                ) : chCheck.found ? (
+                  <div className="rejected" style={{ marginBottom: 12 }}>
+                    <div className="headline">⚠ Company status: {chCheck.status}</div>
+                    <div className="ledger-says">Not an active company — treat with caution.</div>
+                  </div>
+                ) : (
+                  <div className="rejected" style={{ marginBottom: 12 }}>
+                    <div className="headline">⚠ Not confirmed on the register</div>
+                    <div className="ledger-says">{chCheck.note}</div>
+                  </div>
+                )}
+                <div><b>{chCheck.companyName || chCheck.supplierName}</b></div>
+                <div className="sub">Company number (CRN): {chCheck.crn}</div>
+                {chCheck.type && <div className="sub">Type: {chCheck.type}</div>}
+                {chCheck.incorporatedOn && <div className="sub">Incorporated: {chCheck.incorporatedOn}</div>}
+                <div className="sub" style={{ marginTop: 6 }}>
+                  Source:&nbsp;
+                  {chCheck.source === 'live'
+                    ? <b>live Companies House lookup</b>
+                    : <span>cached register snapshot</span>}
+                </div>
+                <p className="sub" style={{ marginTop: 10 }}>
+                  We key every supplier on its Companies House number. A live call runs when an API
+                  key is configured; otherwise the check degrades to a cached snapshot rather than
+                  failing — so the demo never hangs on the network.
+                </p>
+              </div>
+            )}
+            <button className="btn" onClick={() => setChCheck(null)}>Close</button>
           </div>
         </div>
       )}

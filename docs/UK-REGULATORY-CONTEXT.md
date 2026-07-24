@@ -5,10 +5,12 @@ banking audience. One short paragraph per topic. **Honesty rule:** where a contr
 not built in the prototype, it says so — the demo labels its mocks, and so does this.
 
 **Built today:** separation of duty (role-based field masking), document-hash anchoring +
-integrity check against the ledger record, immutable per-invoice audit trail, and the on-chain /
-off-chain data split. **Designed and scoped, not built:** maker-checker dual approval, exposure /
-trading-relationship limits, and the external provenance checks (Companies House, HMRC VAT,
-Confirmation of Payee, Open Banking settlement history) — see "What we'd add next".
+integrity check against the ledger record, immutable per-invoice audit trail, the on-chain /
+off-chain data split, and a Companies House register check for the supplier (a live call when an
+API key is configured, degrading to a cached snapshot otherwise). **Designed and scoped, not
+built:** maker-checker dual approval, exposure / trading-relationship limits, and the remaining
+external provenance checks (HMRC VAT, Confirmation of Payee, Open Banking settlement history) —
+see "What we'd add next".
 
 ---
 
@@ -42,8 +44,9 @@ asset, not only a fraud tool.
 into force on 18 November 2025, with existing directors and PSCs expected to be verified by autumn
 2026 and enforcement activity from the end of 2026. This makes Companies House a materially stronger
 know-your-business source than it was, and it is why we key every supplier on its Companies House
-number (CRN) as the primary entity identifier. (The live Companies House verification *call* is
-scoped, not yet built — see "What we'd add next".)
+number (CRN) as the primary entity identifier. The prototype wires a register check against the
+supplier's CRN — a live Companies House call when an API key is configured, degrading to a cached
+register snapshot on a missing key, timeout, or error, so it never blocks the flow.
 
 **Assignment of receivables.** A legal assignment of a debt requires express written notice to the
 debtor under section 136 of the Law of Property Act 1925. Our payer-approval step is, in substance,
@@ -97,8 +100,9 @@ afterwards. State this plainly rather than let a judge surface it.
   pattern: the **same PDF registered by two unrelated supplier entities** — which is what an
   invoice mill looks like. It is roughly ten lines plus a chaincode redeploy, and it is not a demo
   beat, but it is a genuine gap worth naming.
-- **Live Companies House + HMRC VAT verification** — real calls to real government registers,
-  confirming the supplier is active and the VAT number resolves to the registered legal name.
+- **HMRC VAT verification** — the Companies House register check is wired today; the companion
+  step is a real HMRC call confirming the supplier's VAT number resolves to the registered legal
+  name, closing the gap between "a real company exists" and "this VAT-registered trader is them".
 - **Confirmation of Payee (Pay.UK)** — the UK penny-drop equivalent; stops funds being advanced to
   an account unconnected to the registered supplier.
 - **Open Banking settlement history (AISP)** — with the supplier's consent, confirm this payer has

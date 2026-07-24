@@ -17,6 +17,7 @@ const { maskForRole, maskHistoryForRole } = require('./masking');
 const offchain = require('./offchain');
 const { riskScore } = require('./risk');
 const { extractInvoice } = require('./gemini');
+const { lookupCompany } = require('./companiesHouse');
 const { ApiError, errorHandler } = require('./errors');
 const { validateRegister } = require('./validate');
 
@@ -299,6 +300,27 @@ app.get('/invoices/:id/doc/:type/verify', auth('supplier', 'payer', 'lender'), a
             anchoredHash,           // immutable, from the ledger
             recomputedHash,         // live, from the off-chain file
             match: anchoredHash === recomputedHash
+        });
+    } catch (e) { next(new ApiError(404, 'NOT_FOUND', e.message)); }
+});
+
+/* ---- supplier register check: is this supplier a real, active company? ----
+   Looks up the invoice's supplier CRN on Companies House. A live call runs only
+   when CH_API_KEY is set; otherwise (or on any timeout/error) it returns a
+   labelled cached snapshot — the check degrades, it never errors the flow.
+   Roles: lender (due diligence) and the supplier (their own record). ---- */
+app.get('/invoices/:id/supplier-check', auth('lender', 'supplier'), async (req, res, next) => {
+    try {
+        const ledger = await getLedger();
+        const inv = JSON.parse(await ledger.evaluate('ReadInvoice', req.params.id));
+        if (req.user.role === 'supplier' && inv.supplierCRN !== req.user.supplierCRN)
+            return next(new ApiError(403, 'FORBIDDEN', 'Not your invoice'));
+        const check = await lookupCompany(inv.supplierCRN);
+        res.json({
+            invoiceId: inv.invoiceId,
+            invoiceNumber: inv.invoiceNumber,
+            supplierName: inv.supplierName,
+            ...check
         });
     } catch (e) { next(new ApiError(404, 'NOT_FOUND', e.message)); }
 });

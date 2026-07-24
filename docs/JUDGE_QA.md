@@ -18,6 +18,9 @@ Banks need permissioned membership, data privacy, and predictable costs with no 
 **"How does the lender know the PDF wasn't swapped after registration?"**
 There's a **Verify document** button in the lender console — it recomputes the stored file's SHA-256 and compares it with the fingerprint anchored on the ledger, showing both hashes; a swap of the off-chain file turns it red. You saw the green "integrity confirmed" before we funded. The document lives off-chain; only its fingerprint is on the ledger, and the ledger's copy can't be altered.
 
+**"Do you check the supplier is a real company?"**
+Yes — a **Companies House** button in the lender console looks the supplier up by its company number and shows whether it's active. It's a real integration: a live call to the register when an API key is configured, degrading to a cached register snapshot on a missing key, a timeout, or any error, so it never stalls the flow. HMRC VAT lookup and Confirmation of Payee are the designed next steps (see `docs/UK-REGULATORY-CONTEXT.md`).
+
 **"What if the supplier edits the amount and resubmits?"**
 It never gets on the ledger: an invoice number is single-use per supplier, so the resubmission is rejected at registration with DUPLICATE INVOICE BLOCKED naming both amounts — and, because the amounts differ, flagged as a possible tampered or fake invoice. You saw the red banner live.
 

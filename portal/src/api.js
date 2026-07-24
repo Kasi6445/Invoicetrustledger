@@ -78,6 +78,11 @@ export async function getDoc(id, type) {
 export const verifyDoc = (id, type) =>
   client.get(`/invoices/${id}/doc/${type}/verify`).then(r => r.data);
 
+// Companies House register check for the invoice's supplier CRN.
+// Returns { found, status, companyName, source: 'live'|'cached', ... }.
+export const supplierCheck = id =>
+  client.get(`/invoices/${id}/supplier-check`).then(r => r.data);
+
 // files: { invoiceCopy, purchaseOrder, goodsReceived } — each optional.
 export function registerInvoice(fields, files) {
   const fd = new FormData();
