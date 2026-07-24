@@ -170,7 +170,7 @@ cd ~/invoice-trust-ledger/portal && npm run dev
 4. Screen-record one perfect run (backup video on phone + pen drive).
 5. Read JUDGE_QA.md out loud once as a team. Freeze code — no changes after tonight.
 
-Pre-walk-in checklist: network up (fabric mode) · API running · seeded · portal open · both PDFs on desktop · hotspot on (Gemini) · notifications off · browser zoom 125% · backup video reachable.
+Pre-walk-in checklist: network up (fabric mode) · API running · seeded · **INV-2026-001 shows grade A** (a silent grade **B** means stale off-chain data — you skipped `rm -rf api/data`; nothing errors, it just looks like a broken demo) · portal open · both PDFs on desktop · hotspot on (Gemini) · notifications off · browser zoom 125% · backup video reachable.
 
 ---
 
