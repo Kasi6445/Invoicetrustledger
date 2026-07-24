@@ -1,6 +1,6 @@
 # Invoice Trust Ledger — E2E evidence index
 
-Final clean run: 2026-07-24 · **24/24 tests passed** (18 API-contract + 1 full
+Final clean run: 2026-07-24 · **26/26 tests passed** (20 API-contract + 1 full
 UI lifecycle + 4 real-document scenarios + 1 targeted OCR test) against the
 **live Hyperledger Fabric network** (`LEDGER_MODE=fabric`, chaincode `invoicecc`
 **v3.0 / sequence 1** on `mychannel`, fresh ledger). Now on the **v4 UK/Lloyds
@@ -32,7 +32,7 @@ CR01 UI.
   **Funded by me** tab with a disabled `Financed by you` button.
 - `05-lloyds-payment-instructions.png` — **CR01 entitlement unlock**: the funder
   (Lloyds) opens the Payment instructions modal and sees the supplier's FULL
-  bank account + IFSC. No other lender can.
+  bank account + sort code. No other lender can.
 - `06-KILL-SHOT-duplicate-financing-blocked.png` — **the kill shot**: OtherBank
   (non-funder, still sees the bank MASKED to `••••9876`) clicks its stale Fund
   button and the chaincode rejects it: red banner "LEDGER REJECTED THIS
@@ -55,12 +55,12 @@ docHash.
   (INV-2026-014) registers; on-chain docHash === sha256 of the file (hash proof).
 - `R2-duplicate-invoice-blocked-real-pdf.png` — the real INV-2026-007 registered
   twice → the ledger blocks the second registration of the number.
-- `R3-tampered-pdf-ocr-inflated-amount.png` — the tampered twin (₹7,50,000, same
+- `R3-tampered-pdf-ocr-inflated-amount.png` — the tampered twin (£750,000, same
   number) at registration.
 - `R4-supplier-tampered-resubmission-blocked.png` — that tampered resubmission is
   REJECTED ("Possible tampered or fake invoice.").
 - `R5-lender-sees-no-tampered-row.png` — the lender's All tab never shows a
-  ₹7,50,000 row for INV-2026-007 (the fake never reached the ledger).
+  £750,000 row for INV-2026-007 (the fake never reached the ledger).
 - `R6-same-pdf-new-number-registered.png` — the SAME PDF under a NEW number
   registers (different numbers are legitimate).
 - `R7-lender-similar-flag-same-document.png` — but the read-time document-hash
@@ -75,13 +75,15 @@ sha256(file) vs on-chain docHash for the 014 and 007 invoice copies — MATCH: Y
 
 ## Scenario 3 — API contract (`api-regression.spec.ts`, no browser, zero Gemini)
 
-18 direct assertions: auth/roles, REGISTERED shape, DUPLICATE INVOICE BLOCKED
+20 direct assertions: auth/roles, REGISTERED shape, DUPLICATE INVOICE BLOCKED
 (± tamper note), **FINANCING REQUEST REJECTED** (requestedAmount over the 90%
-cap), **register with no invoice copy → 400**,
+cap), **register with no invoice copy → 400**, **document integrity verify**
+(recomputed hash matches the ledger anchor; a tampered on-disk file is caught),
+**Companies House supplier check** (register status, cached-snapshot fallback),
 fund-before-approval, lender decline (no double-decline, doesn't block others),
 FINANCED, **DUPLICATE FINANCING BLOCKED** (competitor masked), lender anonymity
 on reads + history, immutable history with txIds, and CR01 masking: payer
-(no risk/requestedAmount, IFSC masked), non-funding lender (masked bank +
+(no risk/requestedAmount, sort code masked), non-funding lender (masked bank +
 "another financial institution"), funding lender (**entitlement unlock** →
 full bank), and **payment-instructions** (funder 200 / non-funder 403 that never
 names the funder).
