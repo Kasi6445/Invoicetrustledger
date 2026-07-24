@@ -73,6 +73,11 @@ export async function getDoc(id, type) {
   return URL.createObjectURL(res.data);
 }
 
+// Recompute the on-disk document's SHA-256 and compare it to the hash anchored
+// on the ledger at registration. Returns { anchoredHash, recomputedHash, match, ... }.
+export const verifyDoc = (id, type) =>
+  client.get(`/invoices/${id}/doc/${type}/verify`).then(r => r.data);
+
 // files: { invoiceCopy, purchaseOrder, goodsReceived } — each optional.
 export function registerInvoice(fields, files) {
   const fd = new FormData();

@@ -1,4 +1,6 @@
 import { test, expect, APIRequestContext } from '@playwright/test';
+import fs from 'fs';
+import path from 'path';
 
 /**
  * ============================================================================
@@ -147,6 +149,37 @@ test.describe('Invoice Trust Ledger — API business rules', () => {
     const body = await r.json();
     expect(body.code).toBe('VALIDATION_ERROR');
     expect(JSON.stringify(body)).toMatch(/invoice copy/i);
+  });
+
+  test('RULE (integrity) — document verify matches the ledger anchor, and catches a tampered file', async ({ request }) => {
+    // Fresh throwaway invoice (unique number) so corrupting its file affects nothing else.
+    const INV_V = `INV-API-${RUN}-VERIFY`;
+    const reg = await register(request, t.supplier, registerBody(INV_V), `${INV_V}-doc`);
+    expect(reg.status()).toBe(200);
+    const id = (await reg.json()).invoiceId;
+
+    // 1) Clean file: the hash recomputed from disk equals the fingerprint on the ledger.
+    const okr = await request.get(`/invoices/${id}/doc/invoiceCopy/verify`, { headers: auth(t.lloyds) });
+    expect(okr.status()).toBe(200);
+    const okv = await okr.json();
+    expect(okv.algorithm).toBe('SHA-256');
+    expect(okv.match).toBe(true);
+    expect(okv.recomputedHash).toBe(okv.anchoredHash);
+
+    // 2) Tamper the off-chain file on disk; the on-chain anchor cannot follow.
+    //    Defaults to the standard api/data; override when the API-under-test
+    //    writes elsewhere (e.g. an isolated instance): API_DATA_DIR=/path/to/data.
+    const dataDir = process.env.API_DATA_DIR || path.resolve(process.cwd(), '..', 'api', 'data');
+    const db = JSON.parse(fs.readFileSync(path.join(dataDir, 'offchain.json'), 'utf8'));
+    const fileName = db.docs[id].invoiceCopy.fileName;
+    fs.appendFileSync(path.join(dataDir, 'docs', fileName), Buffer.from('TAMPERED-BYTES'));
+
+    const badr = await request.get(`/invoices/${id}/doc/invoiceCopy/verify`, { headers: auth(t.lloyds) });
+    expect(badr.status()).toBe(200);
+    const badv = await badr.json();
+    expect(badv.match).toBe(false);
+    expect(badv.recomputedHash).not.toBe(badv.anchoredHash);
+    expect(badv.anchoredHash).toBe(okv.anchoredHash);   // ledger anchor unchanged by the tamper
   });
 
   test('STEP 2 — payer approves: APPROVED; re-approval rejected', async ({ request }) => {

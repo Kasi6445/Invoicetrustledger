@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { listInvoices, fundInvoice, declineInvoice, getHistory, getPaymentInstructions } from './api';
+import { listInvoices, fundInvoice, declineInvoice, getHistory, getPaymentInstructions, verifyDoc, getDoc } from './api';
 import AuditTrail from './AuditTrail';
 
 const gbp = (v, currency = 'GBP') =>
@@ -14,6 +14,7 @@ export default function LenderView({ me }) {
   const [search, setSearch] = useState('');
   const [tab, setTab] = useState('ready');
   const [payInfo, setPayInfo] = useState(null);   // funder-only payment instructions modal
+  const [docCheck, setDocCheck] = useState(null); // document integrity-verification modal
 
   const refresh = () => listInvoices().then(setInvoices).catch(() => {});
   useEffect(() => { refresh(); }, []);
@@ -70,6 +71,18 @@ export default function LenderView({ me }) {
     setPayInfo({ loading: true });
     try { setPayInfo(await getPaymentInstructions(id)); }
     catch (e) { setPayInfo({ error: e.response?.data?.error || e.message }); }
+  }
+
+  // Due-diligence beat: recompute the stored invoice-copy's hash and prove it
+  // matches the fingerprint anchored on the ledger. Green = provably unchanged.
+  async function checkDoc(id) {
+    setDocCheck({ loading: true });
+    try { setDocCheck(await verifyDoc(id, 'invoiceCopy')); }
+    catch (e) { setDocCheck({ error: e.response?.data?.error || e.message }); }
+  }
+  async function openDoc(id) {
+    try { window.open(await getDoc(id, 'invoiceCopy'), '_blank', 'noopener'); }
+    catch (e) { setDocCheck({ error: e.response?.data?.error || e.message }); }
   }
 
   return (
@@ -201,6 +214,9 @@ export default function LenderView({ me }) {
                               onClick={() => showPayInstructions(inv.invoiceId)}>Payment instructions</button>{' '}</>
                   )}
                   <button className="btn" disabled={fundingId !== null}
+                          onClick={() => checkDoc(inv.invoiceId)}
+                          title="Recompute the document hash and check it against the ledger">Verify document</button>{' '}
+                  <button className="btn" disabled={fundingId !== null}
                           onClick={async () => { try { setTrail(await getHistory(inv.invoiceId)); } catch {} }}>Audit trail</button>
                 </td>
               </tr>
@@ -236,6 +252,48 @@ export default function LenderView({ me }) {
               </div>
             )}
             <button className="btn" onClick={() => setPayInfo(null)}>Close</button>
+          </div>
+        </div>
+      )}
+
+      {docCheck && (
+        <div className="overlay" onClick={() => setDocCheck(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <h3>Document integrity</h3>
+            {docCheck.loading && <p className="sub">Recomputing hash…</p>}
+            {docCheck.error && <p style={{ color: 'var(--red)' }}>{docCheck.error}</p>}
+            {!docCheck.loading && !docCheck.error && (
+              <div style={{ fontSize: 14, lineHeight: 1.7 }}>
+                {docCheck.match ? (
+                  <div className="notice-ok" style={{ marginBottom: 12 }}>
+                    ✓ Integrity confirmed — the stored invoice copy is byte-identical to the
+                    document anchored on the ledger at registration.
+                  </div>
+                ) : (
+                  <div className="rejected" style={{ marginBottom: 12 }}>
+                    <div className="headline">⛔ Document does NOT match the ledger</div>
+                    <div className="ledger-says">
+                      The off-chain file has changed since it was anchored — do not fund against it.
+                    </div>
+                  </div>
+                )}
+                <div className="sub">Invoice {docCheck.invoiceNumber} · {docCheck.type} · {docCheck.algorithm}</div>
+                <div style={{ marginTop: 8 }}>
+                  <div className="sub">Anchored on ledger</div>
+                  <code style={{ fontSize: 11, wordBreak: 'break-all' }}>{docCheck.anchoredHash}</code>
+                  <div className="sub" style={{ marginTop: 6 }}>Recomputed from the stored file</div>
+                  <code style={{ fontSize: 11, wordBreak: 'break-all',
+                                 color: docCheck.match ? 'var(--ok)' : 'var(--red)' }}>{docCheck.recomputedHash}</code>
+                </div>
+                <p className="sub" style={{ marginTop: 10 }}>
+                  The document lives off-chain and is mutable; its fingerprint on the ledger is not.
+                  This proves the copy has not been swapped since the payer approved it.
+                </p>
+                <button className="btn" style={{ marginRight: 8 }}
+                        onClick={() => openDoc(docCheck.invoiceId)}>Open document</button>
+              </div>
+            )}
+            <button className="btn" onClick={() => setDocCheck(null)}>Close</button>
           </div>
         </div>
       )}

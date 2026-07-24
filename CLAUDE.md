@@ -216,7 +216,10 @@ demo path ("Plan B") if the Fabric network can't be stood up.
   (via `maskHistoryForRole`), the fund route's 409, and the `payment-instructions` 403. The
   chaincode never masks; the on-chain record stays complete. See the role/field matrix in
   `docs/RULES.md`. New endpoints: `GET /invoices/:id/doc/:type` (stream a supporting document;
-  whitelisted type, traversal-guarded) and `GET /invoices/:id/payment-instructions` (funder-only
+  whitelisted type, traversal-guarded), `GET /invoices/:id/doc/:type/verify` (recompute the
+  on-disk file's SHA-256 and compare it to the hash anchored on the ledger — returns
+  `{ anchoredHash, recomputedHash, match }`; read-only, no rule change, surfaced as the lender's
+  **Verify document** button) and `GET /invoices/:id/payment-instructions` (funder-only
   full bank details; 403 never names the funder).
 - `api/risk.js` — deliberately rule-based (not ML) risk scoring so every point is explainable from
   ledger state (weights sum to 100: payer approval +35, anchored doc hash +15, due-date window +10,

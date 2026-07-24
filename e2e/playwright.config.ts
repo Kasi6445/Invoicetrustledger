@@ -44,7 +44,9 @@ export default defineConfig({
       name: 'api-regression',
       testMatch: /api-regression\.spec\.ts/,
       use: {
-        baseURL: 'http://localhost:3000',
+        // Defaults to the standard local API; override to point the contract
+        // suite at an isolated instance, e.g. API_BASE_URL=http://localhost:3009.
+        baseURL: process.env.API_BASE_URL || 'http://localhost:3000',
       },
     },
   ],

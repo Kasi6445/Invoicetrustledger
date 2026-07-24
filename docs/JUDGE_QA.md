@@ -16,7 +16,7 @@ That's the standard test-network topology; production adds one org per party wit
 Banks need permissioned membership, data privacy, and predictable costs with no gas token — which is exactly the permissioned model Fabric was built for and, notably, the model GCUL itself uses (CDD-verified participants, fees invoiced, not gas).
 
 **"How does the lender know the PDF wasn't swapped after registration?"**
-Recompute the file's SHA-256 and compare it with the on-chain `docHash` — a one-line check. The document lives off-chain; only its fingerprint is on the ledger.
+There's a **Verify document** button in the lender console — it recomputes the stored file's SHA-256 and compares it with the fingerprint anchored on the ledger, showing both hashes; a swap of the off-chain file turns it red. You saw the green "integrity confirmed" before we funded. The document lives off-chain; only its fingerprint is on the ledger, and the ledger's copy can't be altered.
 
 **"What if the supplier edits the amount and resubmits?"**
 It never gets on the ledger: an invoice number is single-use per supplier, so the resubmission is rejected at registration with DUPLICATE INVOICE BLOCKED naming both amounts — and, because the amounts differ, flagged as a possible tampered or fake invoice. You saw the red banner live.

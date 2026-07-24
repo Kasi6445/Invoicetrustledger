@@ -254,6 +254,55 @@ app.get('/invoices/:id/doc/:type', auth('supplier', 'payer', 'lender'), async (r
     } catch (e) { next(new ApiError(404, 'NOT_FOUND', e.message)); }
 });
 
+/* ---- document integrity: recompute the on-disk file's hash and compare it
+   to the fingerprint ANCHORED ON THE LEDGER at registration. The document
+   lives off-chain and is mutable; its hash on-chain is not. This lets a lender
+   cryptographically confirm, before disbursing, that the copy they are about
+   to fund is byte-identical to the one the payer approved — and catches any
+   post-approval swap of the off-chain file. Read-only; no rule change. ---- */
+app.get('/invoices/:id/doc/:type/verify', auth('supplier', 'payer', 'lender'), async (req, res, next) => {
+    try {
+        const { id, type } = req.params;
+        if (!REGISTER_DOCS.includes(type))
+            return next(new ApiError(400, 'VALIDATION_ERROR', `Unknown document type ${type}`));
+
+        const ledger = await getLedger();
+        const inv = JSON.parse(await ledger.evaluate('ReadInvoice', id));
+        if (req.user.role === 'supplier' && inv.supplierCRN !== req.user.supplierCRN)
+            return next(new ApiError(403, 'FORBIDDEN', 'Not your invoice'));
+
+        // The anchor is the hash written to the ledger at registration — never
+        // recomputed from the off-chain store, or the check would be circular.
+        const anchoredHash = (inv.docs && inv.docs[type]) ||
+            (type === 'invoiceCopy' ? inv.docHash : null);
+        if (!anchoredHash)
+            return next(new ApiError(404, 'NOT_FOUND', `No ${type} anchored on the ledger for ${id}`));
+
+        const db = offchain.load();
+        const rec = db.docs[id] && db.docs[id][type];
+        if (!rec) return next(new ApiError(404, 'NOT_FOUND', `No ${type} file on file for ${id}`));
+
+        const docsDir = path.join(__dirname, 'data', 'docs');
+        const resolved = path.resolve(docsDir, rec.fileName);
+        if (!resolved.startsWith(docsDir + path.sep) || !fs.existsSync(resolved))
+            return next(new ApiError(404, 'NOT_FOUND', 'Document file missing'));
+
+        // Recompute from the actual bytes on disk — this is the whole point.
+        const recomputedHash = crypto.createHash('sha256')
+            .update(fs.readFileSync(resolved)).digest('hex');
+
+        res.json({
+            invoiceId: inv.invoiceId,
+            invoiceNumber: inv.invoiceNumber,
+            type,
+            algorithm: 'SHA-256',
+            anchoredHash,           // immutable, from the ledger
+            recomputedHash,         // live, from the off-chain file
+            match: anchoredHash === recomputedHash
+        });
+    } catch (e) { next(new ApiError(404, 'NOT_FOUND', e.message)); }
+});
+
 /* ---- payment instructions: full supplier bank details, funder-only ----
    Only the institution that actually financed this invoice may see where the
    money goes. The 403 must NEVER name the funder — otherwise this endpoint
