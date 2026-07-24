@@ -1,9 +1,11 @@
 # Invoice Trust Ledger — E2E evidence index
 
-Final clean run: 2026-07-23 · **24/24 tests passed** (18 API-contract + 1 full
+Final clean run: 2026-07-24 · **24/24 tests passed** (18 API-contract + 1 full
 UI lifecycle + 4 real-document scenarios + 1 targeted OCR test) against the
 **live Hyperledger Fabric network** (`LEDGER_MODE=fabric`, chaincode `invoicecc`
-**v2.0 / sequence 1** on `mychannel`, fresh ledger). Covers the v3 rules **plus
+**v3.0 / sequence 1** on `mychannel`, fresh ledger). Now on the **v4 UK/Lloyds
+localisation** (GBP, Companies House CRN, Pennine Textiles / Northfield Retail
+Group plc / Lloyds Bank Commercial Banking / Meridian Invoice Finance Ltd). Covers the v3 rules **plus
 CR01** (multi-document hashes, payer credit profiles, funder-only
 payment-instructions entitlement) **plus the pre-demo hardening pass**:
 - **invoice copy MANDATORY** — no invoice registers without a real document hash

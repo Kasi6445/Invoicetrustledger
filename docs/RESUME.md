@@ -35,8 +35,14 @@ _Last updated: 2026-07-23._
     `INVOICE COPY REQUIRED`; the API also fast-fails 400). seed.js/autoSeed attach documents.
   - **Task 4:** financing cap **tightened to 90%** of face value (dual-updated in both engines +
     RULES.md R1b; boundary verified: 90.00% registers, 90.02% rejects).
-- **Chaincode deployed as `invoicecc` v2.0 / sequence 1** on `mychannel` (fresh channel → the
-  first definition is always sequence 1; the version label is bumped to 2.0 for provenance).
+- **v4 UK/Lloyds localisation (Part 0)** landed + verified on fabric: `supplierVRN → supplierCRN`
+  (on-chain key change), GBP/£, UK identities (Pennine Textiles / Northfield / Lloyds Commercial
+  Banking / Meridian), CDD/sort-code terminology. Chaincode redeployed as **`invoicecc` v3.0 /
+  sequence 1** (fresh channel → sequence is always 1; the `_fingerprint` now hashes the CRN, so
+  old ledger records are incompatible — down/up/deploy/seed is the only path).
+  **DR-drill finding:** the fabric reset must now also `rm -rf api/data` (off-chain profiles carry
+  demo identities; a stale `offchain.json` silently degrades grades to B and drops bank details).
+  Reset drill timed at **2m13s** (well under the 10-min target).
 - **e2e suite green:** last clean run **24/24** (18 API-contract + 1 full UI lifecycle + 4
   real-document + 1 targeted OCR), against the **live Fabric** network on a fresh ledger. See
   `e2e/evidence/INDEX.md`.
@@ -75,11 +81,14 @@ cd ~/invoice-trust-ledger && git checkout main && git status
 cd ~/fabric/fabric-samples/test-network
 ./network.sh down
 ./network.sh up createChannel -c mychannel -ca
-./network.sh deployCC -ccn invoicecc -ccp ~/invoice-trust-ledger/chaincode -ccl javascript -ccv 2.0 -ccs 1
+./network.sh deployCC -ccn invoicecc -ccp ~/invoice-trust-ledger/chaincode -ccl javascript -ccv 3.0 -ccs 1
 docker ps --format 'table {{.Names}}\t{{.Status}}'   # expect 8 containers
 
 # 2. API — ALWAYS via restart.sh (never `node server.js &`). Confirm it prints LEDGER_MODE = fabric.
 cd ~/invoice-trust-ledger/api
+rm -rf data                  # MUST clear off-chain data too: profiles carry demo identities
+                             # now (UK localisation) — a stale data/offchain.json silently breaks
+                             # risk grades (unrated-payer cap) and bank masking.
 bash restart.sh
 node seed.js                 # re-seed every time — fabric state does not persist across 'down'
 

@@ -73,7 +73,7 @@ cd ~/fabric/fabric-samples/test-network
 docker ps --format 'table {{.Names}}\t{{.Status}}'   # peers + orderer + CAs all "Up"
 
 # Deploy OUR chaincode
-./network.sh deployCC -ccn invoicecc -ccp ~/invoice-trust-ledger/chaincode -ccl javascript
+./network.sh deployCC -ccn invoicecc -ccp ~/invoice-trust-ledger/chaincode -ccl javascript -ccv 3.0 -ccs 1
 ```
 
 Smoke test (optional but 2 min — proves chaincode works before touching the API):
@@ -149,12 +149,15 @@ Open the portal → audit trail → the tx ids are now genuine Fabric transactio
 #    Check every morning before anything else:
 cd ~/invoice-trust-ledger && git checkout main && git status
 # fabric mode:
-cd ~/fabric/fabric-samples/test-network && ./network.sh down && ./network.sh up createChannel -c mychannel -ca && ./network.sh deployCC -ccn invoicecc -ccp ~/invoice-trust-ledger/chaincode -ccl javascript
+cd ~/fabric/fabric-samples/test-network && ./network.sh down && ./network.sh up createChannel -c mychannel -ca && ./network.sh deployCC -ccn invoicecc -ccp ~/invoice-trust-ledger/chaincode -ccl javascript -ccv 3.0 -ccs 1
 # Start the API with restart.sh — it kills whatever holds :3000 by socket-owner
 # PID (never a name match), refuses to start on a busy port, and prints the
 # LEDGER_MODE it came up in. NEVER `node server.js &` by hand — a stale server
 # on the port serves old code silently.
-cd ~/invoice-trust-ledger/api && bash restart.sh    # <- confirm it prints LEDGER_MODE = fabric
+# A fabric reset now MUST also clear off-chain data (rm -rf data): profiles carry demo
+# identities (UK localisation), so a stale data/offchain.json silently degrades risk
+# grades (unrated-payer cap) and bank masking.
+cd ~/invoice-trust-ledger/api && rm -rf data && bash restart.sh    # <- confirm it prints LEDGER_MODE = fabric
 node seed.js
 cd ~/invoice-trust-ledger/portal && npm run dev
 # mock mode: skip the fabric lines; set LEDGER_MODE=mock in api/.env, rm -rf api/data, then restart.sh.

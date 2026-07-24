@@ -92,6 +92,9 @@ docker ps --format 'table {{.Names}}\t{{.Status}}'
 # 2. API  — the demo runs from the `main` branch.
 cd ~/invoice-trust-ledger && git checkout main
 cd api                               # .env: LEDGER_MODE=fabric, FABRIC_SAMPLES=/home/sandh/fabric/fabric-samples
+rm -rf data                          # MUST clear off-chain data on a fabric reset too: profiles
+                                     # carry demo identities (UK localisation), so a stale
+                                     # data/offchain.json silently degrades risk grades and bank masking
 bash restart.sh                      # kills the :3000 socket-owner by PID, won't start on a busy
                                      # port, prints LEDGER_MODE — never `node server.js &` by hand
 node seed.js
