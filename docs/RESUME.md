@@ -103,7 +103,7 @@ cash today. The fraud it kills: the same invoice being financed twice (by two di
 who can't see each other's books). Three roles — supplier, payer, lender — move one invoice
 through a state machine (`REGISTERED → APPROVED → FINANCED → SETTLED`) on a Hyperledger Fabric
 ledger, with an Express/JWT API doing role-based field masking on top. **The demo's climax — "the
-kill shot":** after Lloyds has financed an invoice, a second lender (OtherBank) clicks its own
+kill shot":** after Lloyds has financed an invoice, a second lender (Meridian) clicks its own
 still-enabled Fund button, and the **ledger itself** rejects the transaction with a red
 `DUPLICATE FINANCING BLOCKED` banner — proving the guarantee holds at the ledger layer even if the
 app's role checks were bypassed, and that no lender can see who the other lender was. The whole

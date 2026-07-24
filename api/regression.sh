@@ -27,7 +27,7 @@ CODE=$(curl -s -o /tmp/itl_body -w "%{http_code}" $API/auth/login \
 
 # missing fields on register → 400 with field-level messages
 CODE=$(curl -s -o /tmp/itl_body -w "%{http_code}" $API/invoices \
-  -H "Authorization: Bearer $ST" -H 'Content-Type: application/json' -d '{"currency":"INR"}')
+  -H "Authorization: Bearer $ST" -H 'Content-Type: application/json' -d '{"currency":"GBP"}')
 [ "$CODE" = "400" ] && grep -q '"code":"VALIDATION_ERROR"' /tmp/itl_body \
   && grep -q '"invoiceNumber"' /tmp/itl_body && grep -q '"amount"' /tmp/itl_body \
   && ok "missing fields on register → 400 with field messages" || bad "missing-field validation" "HTTP $CODE $(cat /tmp/itl_body)"
@@ -35,7 +35,7 @@ CODE=$(curl -s -o /tmp/itl_body -w "%{http_code}" $API/invoices \
 # bad amount / bad currency / bad date → 400
 CODE=$(curl -s -o /tmp/itl_body -w "%{http_code}" $API/invoices \
   -H "Authorization: Bearer $ST" -H 'Content-Type: application/json' \
-  -d '{"invoiceNumber":"INV-VAL-1","payerName":"BigRetail Ltd","amount":-5,"currency":"RUPEES","dueDate":"30-08-2026"}')
+  -d '{"invoiceNumber":"INV-VAL-1","payerName":"Northfield Retail Group plc","amount":-5,"currency":"POUNDS","dueDate":"30-08-2026"}')
 [ "$CODE" = "400" ] && grep -q '"amount"' /tmp/itl_body && grep -q '"currency"' /tmp/itl_body \
   && grep -q '"dueDate"' /tmp/itl_body \
   && ok "bad amount/currency/dueDate → 400 with field messages" || bad "format validation" "HTTP $CODE $(cat /tmp/itl_body)"
@@ -54,16 +54,16 @@ CODE=$(curl -s -o /tmp/itl_body -w "%{http_code}" -X POST $API/invoices/anything
 #  curl infers application/pdf from the .pdf extension)
 head -c 6291456 /dev/zero > /tmp/itl_big.pdf
 CODE=$(curl -s -o /tmp/itl_body -w "%{http_code}" $API/invoices -H "Authorization: Bearer $ST" \
-  -F "invoiceNumber=INV-BIG-1" -F "payerName=BigRetail Ltd" -F "amount=1000" -F "requestedAmount=900" \
-  -F "currency=INR" -F "dueDate=2026-09-30" -F "invoiceCopy=@/tmp/itl_big.pdf")
+  -F "invoiceNumber=INV-BIG-1" -F "payerName=Northfield Retail Group plc" -F "amount=1000" -F "requestedAmount=900" \
+  -F "currency=GBP" -F "dueDate=2026-09-30" -F "invoiceCopy=@/tmp/itl_big.pdf")
 [ "$CODE" = "413" ] && grep -q '"code":"UPLOAD_TOO_LARGE"' /tmp/itl_body \
   && ok "oversized file (6MB) → 413 rejected" || bad "oversized upload" "HTTP $CODE $(cat /tmp/itl_body)"
 
 # wrong-type upload → rejected (curl sends .txt as text/plain — not an allowed type)
 echo "just text" > /tmp/itl_bad.txt
 CODE=$(curl -s -o /tmp/itl_body -w "%{http_code}" $API/invoices -H "Authorization: Bearer $ST" \
-  -F "invoiceNumber=INV-TYPE-1" -F "payerName=BigRetail Ltd" -F "amount=1000" -F "requestedAmount=900" \
-  -F "currency=INR" -F "dueDate=2026-09-30" -F "invoiceCopy=@/tmp/itl_bad.txt")
+  -F "invoiceNumber=INV-TYPE-1" -F "payerName=Northfield Retail Group plc" -F "amount=1000" -F "requestedAmount=900" \
+  -F "currency=GBP" -F "dueDate=2026-09-30" -F "invoiceCopy=@/tmp/itl_bad.txt")
 [ "$CODE" = "415" ] && grep -q '"code":"UPLOAD_TYPE"' /tmp/itl_body \
   && ok "wrong-type file (.txt) → 415 rejected" || bad "wrong-type upload" "HTTP $CODE $(cat /tmp/itl_body)"
 

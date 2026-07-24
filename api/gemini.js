@@ -11,15 +11,15 @@ const MODEL = 'gemini-2.5-flash';
 function simulatedExtraction() {
     return {
         invoiceNumber: 'INV-2026-007',
-        supplierName: 'Sri Lakshmi Textiles Pvt Ltd',
-        supplierVRN: 'VRN123456',
-        payerName: 'BigRetail Ltd',
-        amount: 500000,
-        currency: 'INR',
+        supplierName: 'Pennine Textiles Ltd',
+        supplierCRN: '09876543',
+        payerName: 'Northfield Retail Group plc',
+        amount: 85000,
+        currency: 'GBP',
         invoiceDate: '2026-07-01',
         dueDate: '2026-08-30',
-        goodsDescription: '200 bales cotton yarn, 40s count',
-        poNumber: 'PO-BR-2026-3391',
+        goodsDescription: '200 rolls worsted wool cloth, 40s count',
+        poNumber: 'PO-NRG-2026-3391',
         simulated: true,
         note: 'GEMINI_API_KEY not set — returned built-in sample fields. Add a key to .env for real OCR.'
     };
@@ -34,7 +34,7 @@ async function extractInvoice(buffer, mimeType) {
                 { inline_data: { mime_type: mimeType, data: buffer.toString('base64') } },
                 { text:
 `Read this invoice document. Return ONLY a JSON object, no markdown, no explanation:
-{"invoiceNumber":"", "supplierName":"", "supplierVRN":"", "payerName":"",
+{"invoiceNumber":"", "supplierName":"", "supplierCRN":"", "payerName":"",
  "amount":0, "currency":"", "invoiceDate":"", "dueDate":"",
  "goodsDescription":"", "poNumber":""}
 Use empty string or 0 for anything not present. Dates as YYYY-MM-DD.

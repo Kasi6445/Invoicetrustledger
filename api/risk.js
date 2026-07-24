@@ -7,7 +7,7 @@
 // different invoice numbers is a legitimate everyday pattern (recurring
 // monthly billing), so it can only ever FLAG, never block or score alone.
 const commercialKey = inv =>
-    `${String(inv.supplierVRN || '').trim().toUpperCase()}|` +
+    `${String(inv.supplierCRN || '').trim().toUpperCase()}|` +
     `${String(inv.payerName || '').trim().toLowerCase()}|${Number(inv.amount)}`;
 
 // Weights sum to 100 (max): five ledger-derived signals (80) plus two
@@ -90,7 +90,7 @@ function riskScore(inv, all = [], payerProfile = null) {
     let grade = score >= 78 ? 'A' : score >= 55 ? 'B' : 'C';
     // Structural cap: an invoice whose payer has NO credit rating on file can
     // never earn the top grade — capped at B independent of the score. This is
-    // why an unrated payer (e.g. MegaMart) grades B; it is a deliberate rule,
+    // why an unrated payer (e.g. Caledonian Stores) grades B; it is a deliberate rule,
     // not a fragile one-point margin around the A threshold.
     const payerRated = !!(payerProfile && payerProfile.payerRating);
     if (!payerRated && grade === 'A') {

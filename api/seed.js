@@ -3,7 +3,7 @@
 // Against a hosted deploy: node seed.js https://your-app.onrender.com
 //                      or: API_URL=https://your-app.onrender.com node seed.js
 // Seeds: INV-2026-001 already FINANCED by Lloyds, INV-2026-002 APPROVED and ready to fund,
-// plus two MegaMart Ltd invoices (one REGISTERED, one APPROVED) so the lender
+// plus two Caledonian Stores Ltd invoices (one REGISTERED, one APPROVED) so the lender
 // console's search box and tabs have a second payer to filter on.
 //
 // The invoice copy is now MANDATORY (server rejects a register with no file), so each
@@ -45,22 +45,22 @@ const synthDoc = number => ({ buffer: Buffer.from(`seed-doc-${number}`), fileNam
     const p = (await post('/auth/login', { username: 'payer1',    password: 'demo123' })).token;
     const l = (await post('/auth/login', { username: 'lloyds',    password: 'demo123' })).token;
 
-    const a = await register({ invoiceNumber: 'INV-2026-001', payerName: 'BigRetail Ltd',
-        amount: 250000, requestedAmount: 225000, currency: 'INR',
+    const a = await register({ invoiceNumber: 'INV-2026-001', payerName: 'Northfield Retail Group plc',
+        amount: 250000, requestedAmount: 225000, currency: 'GBP',
         invoiceDate: '2026-07-05', dueDate: '2026-08-15' }, realDoc(), s);
     await post(`/invoices/${a.invoiceId}/approve`, {}, p);
     await post(`/invoices/${a.invoiceId}/fund`, {}, l);                 // one already-financed example
 
-    const b = await register({ invoiceNumber: 'INV-2026-002', payerName: 'BigRetail Ltd',
-        amount: 400000, requestedAmount: 360000, currency: 'INR',
+    const b = await register({ invoiceNumber: 'INV-2026-002', payerName: 'Northfield Retail Group plc',
+        amount: 400000, requestedAmount: 360000, currency: 'GBP',
         invoiceDate: '2026-07-20', dueDate: '2026-09-01' }, synthDoc('INV-2026-002'), s);
     await post(`/invoices/${b.invoiceId}/approve`, {}, p);              // one ready-to-fund example
 
-    const c = await register({ invoiceNumber: 'INV-2026-003', payerName: 'MegaMart Ltd',
-        amount: 180000, requestedAmount: 150000, currency: 'INR',
+    const c = await register({ invoiceNumber: 'INV-2026-003', payerName: 'Caledonian Stores Ltd',
+        amount: 180000, requestedAmount: 150000, currency: 'GBP',
         invoiceDate: '2026-08-01', dueDate: '2026-09-20' }, synthDoc('INV-2026-003'), s);  // search-demo: REGISTERED
-    const d = await register({ invoiceNumber: 'INV-2026-004', payerName: 'MegaMart Ltd',
-        amount: 620000, requestedAmount: 550000, currency: 'INR',
+    const d = await register({ invoiceNumber: 'INV-2026-004', payerName: 'Caledonian Stores Ltd',
+        amount: 620000, requestedAmount: 550000, currency: 'GBP',
         invoiceDate: '2026-08-10', dueDate: '2026-10-05' }, synthDoc('INV-2026-004'), s);
     await post(`/invoices/${d.invoiceId}/approve`, {}, p);              // search-demo: ready to fund
 

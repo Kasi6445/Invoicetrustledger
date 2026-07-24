@@ -38,7 +38,7 @@ function clearSession() {
   sessionStorage.removeItem(USER_KEY);
 }
 
-// Survive a page refresh: restore { role, displayName, vrn } if a token is stored.
+// Survive a page refresh: restore { role, displayName, supplierCRN, payerId } if a token is stored.
 export function restoreSession() {
   const raw = sessionStorage.getItem(USER_KEY);
   if (!token || !raw) return null;
@@ -50,8 +50,9 @@ export async function login(username, password) {
   token = data.token;
   sessionStorage.setItem(TOKEN_KEY, data.token);
   sessionStorage.setItem(USER_KEY, JSON.stringify(
-    { role: data.role, displayName: data.displayName, vrn: data.vrn }));
-  return data; // { token, role, displayName, vrn }
+    { role: data.role, displayName: data.displayName,
+      supplierCRN: data.supplierCRN, payerId: data.payerId }));
+  return data; // { token, role, displayName, supplierCRN, payerId }
 }
 export function logout() { clearSession(); }
 

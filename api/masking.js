@@ -1,6 +1,6 @@
 'use strict';
 // Field-level RBAC rules (read-time, per-viewer; the chain keeps the full truth):
-// - Payer sees commercial truth; NOT full bank details, NOT KYC refs, NOT lender
+// - Payer sees commercial truth; NOT full bank details, NOT CDD records, NOT lender
 //   risk/financing economics; and not their own profile echoed back to them.
 // - Lender sees funding & risk data + the payer's credit profile. Supplier bank
 //   details stay masked UNLESS this lender funded this invoice (entitlement
@@ -9,8 +9,10 @@
 // - Supplier sees their own record in full (but not the payer's credit profile).
 
 const last4 = v => (v ? '••••' + String(v).slice(-4) : null);
-// Keep the bank prefix (already visible via bankName) but mask the routable rest.
-const maskIfsc = v => (v ? String(v).slice(0, 4) + '•••••••' : null);
+// Keep a short prefix but mask the rest of the routing field (behaviour preserved
+// from the pre-localisation routing-code masking; sort codes are public, so tightening this
+// is a later UX refinement, not part of the mechanical sweep).
+const maskSortCode = v => (v ? String(v).slice(0, 4) + '•••••••' : null);
 const OTHER_INSTITUTION = 'another financial institution';
 
 // Strip competitor identities from a single invoice record for a lender viewer.
@@ -34,8 +36,8 @@ function maskForRole(invoice, supplierProfile, payerProfile, role, viewerName) {
     if (role === 'payer') {
         if (sp) {
             sp.bankAccount = last4(sp.bankAccount);
-            sp.ifsc = maskIfsc(sp.ifsc);
-            sp.kycDocRef = 'restricted';
+            sp.sortCode = maskSortCode(sp.sortCode);
+            sp.cddRecordRef = 'restricted';
         }
         delete out.risk;             // lender underwriting data — restricted for payer
         delete out.requestedAmount;  // financing economics — not the payer's business
@@ -53,9 +55,9 @@ function maskForRole(invoice, supplierProfile, payerProfile, role, viewerName) {
         if (sp) {
             if (!funderIsViewer) {
                 sp.bankAccount = last4(sp.bankAccount);
-                sp.ifsc = maskIfsc(sp.ifsc);
+                sp.sortCode = maskSortCode(sp.sortCode);
             }
-            sp.kycDocRef = 'vault://masked (entitlement required)';  // always masked
+            sp.cddRecordRef = 'vault://masked (entitlement required)';  // always masked
         }
         out = maskLenderIdentities(out, viewerName);   // anonymity, after entitlement read
         out.supplierProfile = sp;

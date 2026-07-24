@@ -8,9 +8,9 @@ passes all 26 checks is a valid implementation.
 
 ## Identity
 
-- **Fingerprint** = SHA-256 of `UPPER(TRIM(invoiceNumber)) | UPPER(TRIM(supplierVRN)) | Number(amount)`
+- **Fingerprint** = SHA-256 of `UPPER(TRIM(invoiceNumber)) | UPPER(TRIM(supplierCRN)) | Number(amount)`
   (stored on the record as provenance; no longer used for duplicate detection)
-- **NumberKey**   = SHA-256 of `UPPER(TRIM(invoiceNumber)) | UPPER(TRIM(supplierVRN))`
+- **NumberKey**   = SHA-256 of `UPPER(TRIM(invoiceNumber)) | UPPER(TRIM(supplierCRN))`
   (the uniqueness key)
 
 ## Rules
@@ -28,7 +28,7 @@ passes all 26 checks is a valid implementation.
 | R6 | Only a `FINANCED` invoice can become `SETTLED`. |
 | R7 | **Immutable audit trail:** every state change is permanently recorded with a transaction id + timestamp; full per-invoice history is queryable. |
 | R8 | Timestamps come from the transaction context (deterministic), never from local wall-clock inside contract logic. |
-| R9 | On-chain stores proofs only: statuses, hashes (`docHash`, fingerprint), timestamps, actor names. Documents, bank details and KYC live off-chain; the chain holds their hash. |
+| R9 | On-chain stores proofs only: statuses, hashes (`docHash`, fingerprint), timestamps, actor names. Documents, bank details and CDD records live off-chain; the chain holds their hash. |
 | R10 | **Lender anonymity (API layer, not ledger):** one lender never sees another lender's name. For a lender viewer, `financedBy` of a competitor and every foreign `declines` entry become `another financial institution` (decline reasons removed), including inside audit-trail history and error messages. Supplier and payer always see real lender names. The on-chain record stays complete — the chaincode never masks. |
 | R11 | **Similar-invoice detection (API layer, read-time — flag, NEVER block):** R1 closed number reuse; the workaround is re-registering the same invoice under a NEW number, so reads compute a similarity pass across the full ledger. **Strong tier:** identical `docHash` on two+ invoices (excluding `no-document`/absent) → −25 risk points (floor 0) and a `⚠ Same document already registered as …` reason. **Soft tier:** same normalized supplier+payer+amount under different numbers → informational `ℹ Similar invoice(s) on ledger …` reason, zero score change — because different numbers with the same amount is legitimate everyday recurring billing. Flags live inside `risk.similar` (hidden from the payer with the rest of `risk`); matching spans all statuses and never blocks registration — detection in the system, decision with the institution. |
 
@@ -50,7 +50,7 @@ verifyChain()          // tamper-evidence proof (backend-appropriate)
 ```
 
 Argument order:
-- `RegisterInvoice(invoiceId, invoiceNumber, supplierName, supplierVRN, payerName, amount, requestedAmount, currency, invoiceDate, dueDate, docHashes)` — CR01 signature (11 positional args; `docHashes` is a JSON string, `{}` for none)
+- `RegisterInvoice(invoiceId, invoiceNumber, supplierName, supplierCRN, payerName, amount, requestedAmount, currency, invoiceDate, dueDate, docHashes)` — CR01 signature (11 positional args; `docHashes` is a JSON string, `{}` for none)
 - `ApproveInvoice(invoiceId, approverName)` · `DisputeInvoice(invoiceId, approverName, reason)`
 - `DeclineInvoice(invoiceId, lenderName, reason)`
 - `FundInvoice(invoiceId, lenderName)` · `SettleInvoice(invoiceId)`
@@ -70,8 +70,8 @@ on a `FINANCED` invoice.
 | `risk` (score/grade/reasons, incl. `similar`) | ✅ | ❌ removed | ✅ | ✅ |
 | `goodsDescription` + supporting-doc access | ✅ | ✅ | ✅ | ✅ |
 | Supplier `bankAccount` | full | last-4 | last-4 | **full** (entitlement) |
-| Supplier `ifsc` | full | masked | masked | **full** (entitlement) |
-| Supplier `kycDocRef` | full | `restricted` | masked | masked (always) |
+| Supplier `sortCode` | full | masked | masked | **full** (entitlement) |
+| Supplier `cddRecordRef` | full | `restricted` | masked | masked (always) |
 | `payerProfile` (terms, rating, settlement) | ❌ null | ❌ null (knows own) | ✅ full | ✅ full |
 | Competitor lender identity (`financedBy`, foreign `declines`) | real name | real name | `another financial institution` | `another financial institution` |
 

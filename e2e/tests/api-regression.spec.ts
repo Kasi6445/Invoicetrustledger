@@ -23,7 +23,7 @@ const RUN = Date.now();
 const INV_A = `INV-API-${RUN}-A`; // happy path + duplicates
 const INV_B = `INV-API-${RUN}-B`; // fund-before-approval guard
 
-type Tokens = { supplier: string; payer: string; lloyds: string; otherbank: string };
+type Tokens = { supplier: string; payer: string; lloyds: string; meridian: string };
 
 async function login(request: APIRequestContext, username: string): Promise<string> {
   const r = await request.post('/auth/login', { data: { username, password: 'demo123' } });
@@ -36,7 +36,7 @@ async function allTokens(request: APIRequestContext): Promise<Tokens> {
     supplier: await login(request, 'supplier1'),
     payer: await login(request, 'payer1'),
     lloyds: await login(request, 'lloyds'),
-    otherbank: await login(request, 'otherbank'),
+    meridian: await login(request, 'meridian'),
   };
 }
 
@@ -44,10 +44,10 @@ const auth = (t: string) => ({ Authorization: `Bearer ${t}` });
 
 const registerBody = (invoiceNumber: string, amount = 500000) => ({
   invoiceNumber,
-  payerName: 'BigRetail Ltd',
+  payerName: 'Northfield Retail Group plc',
   amount,
   requestedAmount: Math.round(amount * 0.9),   // CR01: advance <= 90% of face value
-  currency: 'INR',
+  currency: 'GBP',
   invoiceDate: '2026-07-01',
   dueDate: '2026-08-30',
 });
@@ -160,18 +160,18 @@ test.describe('Invoice Trust Ledger — API business rules', () => {
 
   test('RULE — a lender may decline; it never blocks other lenders', async ({ request }) => {
     const r = await request.post(`/invoices/${invoiceId}/decline`, {
-      headers: auth(t.otherbank),
+      headers: auth(t.meridian),
       data: { reason: 'Outside risk appetite' },
     });
     expect(r.status()).toBe(200);
     const inv = await r.json();
     expect(inv.status, 'a decline does NOT change status').toBe('APPROVED');
     expect(inv.declines).toHaveLength(1);
-    expect(inv.declines[0].by).toBe('OtherBank NBFC'); // own decline: unmasked
+    expect(inv.declines[0].by).toBe('Meridian Invoice Finance Ltd'); // own decline: unmasked
     expect(inv.declines[0].reason).toBe('Outside risk appetite');
 
     const again = await request.post(`/invoices/${invoiceId}/decline`, {
-      headers: auth(t.otherbank),
+      headers: auth(t.meridian),
       data: { reason: 'twice' },
     });
     expect(again.status(), 'same lender cannot decline twice').toBe(409);
@@ -183,12 +183,12 @@ test.describe('Invoice Trust Ledger — API business rules', () => {
     expect(r.status()).toBe(200);
     const inv = await r.json();
     expect(inv.status).toBe('FINANCED');
-    expect(inv.financedBy).toBe('Lloyds Bank');
+    expect(inv.financedBy).toBe('Lloyds Bank Commercial Banking');
     expect(inv.financedAt).toBeTruthy();
   });
 
   test('THE KILL SHOT — second lender is BLOCKED, competitor name masked', async ({ request }) => {
-    const r = await request.post(`/invoices/${invoiceId}/fund`, { headers: auth(t.otherbank) });
+    const r = await request.post(`/invoices/${invoiceId}/fund`, { headers: auth(t.meridian) });
     expect(r.status()).toBe(409);
     const { error } = await r.json();
     expect(error).toMatch(/DUPLICATE FINANCING BLOCKED/i);
@@ -200,18 +200,18 @@ test.describe('Invoice Trust Ledger — API business rules', () => {
   });
 
   test('LENDER ANONYMITY — reads and history never name a competitor', async ({ request }) => {
-    const asOther = await (await request.get(`/invoices/${invoiceId}`, { headers: auth(t.otherbank) })).json();
+    const asOther = await (await request.get(`/invoices/${invoiceId}`, { headers: auth(t.meridian) })).json();
     expect(asOther.financedBy).toBe('another financial institution');
 
     const asLloyds = await (await request.get(`/invoices/${invoiceId}`, { headers: auth(t.lloyds) })).json();
-    expect(asLloyds.financedBy).toBe('Lloyds Bank');            // own name intact
+    expect(asLloyds.financedBy).toBe('Lloyds Bank Commercial Banking');            // own name intact
     expect(asLloyds.declines[0].by).toBe('another financial institution');
     expect(asLloyds.declines[0].reason, 'foreign decline reasons stripped').toBeUndefined();
 
     const asPayer = await (await request.get(`/invoices/${invoiceId}`, { headers: auth(t.payer) })).json();
-    expect(asPayer.financedBy, 'payer must know whom to settle with').toBe('Lloyds Bank');
+    expect(asPayer.financedBy, 'payer must know whom to settle with').toBe('Lloyds Bank Commercial Banking');
 
-    const hist = await (await request.get(`/invoices/${invoiceId}/history`, { headers: auth(t.otherbank) })).json();
+    const hist = await (await request.get(`/invoices/${invoiceId}/history`, { headers: auth(t.meridian) })).json();
     expect(JSON.stringify(hist), 'audit trail must not leak the competitor').not.toContain('Lloyds');
   });
 
@@ -234,32 +234,32 @@ test.describe('Invoice Trust Ledger — API business rules', () => {
   test('RBAC MASKING — payer: last-4 bank only, no risk/requestedAmount', async ({ request }) => {
     const r = await request.get(`/invoices/${invoiceId}`, { headers: auth(t.payer) });
     const inv = await r.json();
-    expect(inv.supplierProfile.bankAccount).toBe('••••9876');
-    expect(inv.supplierProfile.ifsc, 'IFSC masked for payer').toMatch(/•/);
-    expect(inv.supplierProfile.sortCode, 'sortCode replaced by ifsc').toBeUndefined();
+    expect(inv.supplierProfile.bankAccount).toBe('••••5678');
+    expect(inv.supplierProfile.sortCode, 'sort code masked for payer').toMatch(/•/);
+    expect(inv.supplierProfile.ifsc, 'ifsc replaced by sortCode').toBeUndefined();
     expect(inv.risk).toBeUndefined();          // lender underwriting data — hidden from payer
     expect(inv.requestedAmount, 'financing economics hidden from payer').toBeUndefined();
     expect(inv.payerProfile, 'payer is not shown their own profile back').toBeNull();
-    expect(JSON.stringify(inv)).not.toContain('004512349876');
+    expect(JSON.stringify(inv)).not.toContain('12345678');
   });
 
   // INV_A is FINANCED BY LLOYDS, so the two lender viewers diverge: a competitor
   // stays masked; the funder unlocks the supplier's real bank details (CR01).
   test('RBAC MASKING — non-funding lender: masked bank + competitor anonymised', async ({ request }) => {
-    const inv = await (await request.get(`/invoices/${invoiceId}`, { headers: auth(t.otherbank) })).json();
-    expect(inv.supplierProfile.bankAccount).toBe('••••9876');
-    expect(inv.supplierProfile.ifsc).toMatch(/•/);
+    const inv = await (await request.get(`/invoices/${invoiceId}`, { headers: auth(t.meridian) })).json();
+    expect(inv.supplierProfile.bankAccount).toBe('••••5678');
+    expect(inv.supplierProfile.sortCode).toMatch(/•/);
     expect(inv.financedBy).toBe('another financial institution');
     expect(inv.payerProfile?.paymentTerms, 'lender sees payer credit profile').toBeTruthy();
     expect(inv.risk?.grade).toMatch(/^[ABC]$/);
-    expect(JSON.stringify(inv)).not.toContain('004512349876');
+    expect(JSON.stringify(inv)).not.toContain('12345678');
   });
 
   test('RBAC MASKING — funding lender: entitlement unlock reveals full bank', async ({ request }) => {
     const inv = await (await request.get(`/invoices/${invoiceId}`, { headers: auth(t.lloyds) })).json();
-    expect(inv.financedBy).toBe('Lloyds Bank');                     // own name
-    expect(inv.supplierProfile.bankAccount).toBe('004512349876');   // full — funder entitlement
-    expect(inv.supplierProfile.ifsc, 'funder sees real IFSC').not.toMatch(/•/);
+    expect(inv.financedBy).toBe('Lloyds Bank Commercial Banking');                     // own name
+    expect(inv.supplierProfile.bankAccount).toBe('12345678');   // full — funder entitlement
+    expect(inv.supplierProfile.sortCode, 'funder sees real sort code').not.toMatch(/•/);
     expect(inv.risk?.grade).toMatch(/^[ABC]$/);
   });
 
@@ -267,10 +267,10 @@ test.describe('Invoice Trust Ledger — API business rules', () => {
     const ok = await request.get(`/invoices/${invoiceId}/payment-instructions`, { headers: auth(t.lloyds) });
     expect(ok.status()).toBe(200);
     const pi = await ok.json();
-    expect(pi.bankAccount).toBe('004512349876');
-    expect(pi.ifsc).toBeTruthy();
+    expect(pi.bankAccount).toBe('12345678');
+    expect(pi.sortCode).toBeTruthy();
 
-    const denied = await request.get(`/invoices/${invoiceId}/payment-instructions`, { headers: auth(t.otherbank) });
+    const denied = await request.get(`/invoices/${invoiceId}/payment-instructions`, { headers: auth(t.meridian) });
     expect(denied.status()).toBe(403);
     const body = JSON.stringify(await denied.json());
     expect(body, 'the 403 must not leak the funder identity').not.toContain('Lloyds');
@@ -280,7 +280,7 @@ test.describe('Invoice Trust Ledger — API business rules', () => {
   test('RBAC MASKING — supplier sees their own record unmasked', async ({ request }) => {
     const r = await request.get(`/invoices/${invoiceId}`, { headers: auth(t.supplier) });
     const inv = await r.json();
-    expect(inv.supplierProfile.bankAccount).toBe('004512349876');
-    expect(inv.supplierProfile.ifsc).not.toMatch(/•/);
+    expect(inv.supplierProfile.bankAccount).toBe('12345678');
+    expect(inv.supplierProfile.sortCode).not.toMatch(/•/);
   });
 });

@@ -3,9 +3,13 @@ import { listInvoices, registerInvoice, aiExtract, getHistory } from './api';
 import AuditTrail from './AuditTrail';
 
 const EMPTY = {
-  invoiceNumber: '', payerName: 'BigRetail Ltd', amount: '', requestedAmount: '',
-  currency: 'INR', invoiceDate: '', dueDate: '', goodsDescription: ''
+  invoiceNumber: '', payerName: 'Northfield Retail Group plc', amount: '', requestedAmount: '',
+  currency: 'GBP', invoiceDate: '', dueDate: '', goodsDescription: ''
 };
+
+// UK currency formatting: en-GB, GBP, e.g. £250,000.00
+const gbp = (v, currency = 'GBP') =>
+  Number(v).toLocaleString('en-GB', { style: 'currency', currency: currency || 'GBP' });
 const NO_FILES = { invoiceCopy: null, purchaseOrder: null, goodsReceived: null };
 
 export default function SupplierView({ me }) {
@@ -72,7 +76,7 @@ export default function SupplierView({ me }) {
     } finally { setBusy(false); }
   }
 
-  const mine = invoices.filter(i => i.supplierVRN === me.vrn);
+  const mine = invoices.filter(i => i.supplierCRN === me.supplierCRN);
   const canSubmit = !busy && fields.invoiceNumber && fields.amount && fields.requestedAmount
     && files.invoiceCopy && !requestedTooHigh;
 
@@ -110,8 +114,8 @@ export default function SupplierView({ me }) {
 
         {requestedTooHigh && (
           <p style={{ fontSize: 13, color: 'var(--red)', margin: '8px 0 0' }}>
-            Financing requested ({fields.currency} {Number(fields.requestedAmount).toLocaleString('en-IN')}) cannot exceed
-            90% of the invoice face value ({fields.currency} {Number(0.9 * amt).toLocaleString('en-IN')}).
+            Financing requested ({gbp(fields.requestedAmount, fields.currency)}) cannot exceed
+            90% of the invoice face value ({gbp(0.9 * amt, fields.currency)}).
           </p>
         )}
 
@@ -154,8 +158,8 @@ export default function SupplierView({ me }) {
             {mine.map(inv => (
               <tr key={inv.invoiceId}>
                 <td>{inv.invoiceNumber}<div className="sub">{inv.invoiceId}</div></td>
-                <td className="amount">{inv.currency} {Number(inv.amount).toLocaleString('en-IN')}</td>
-                <td className="amount">{inv.requestedAmount != null ? `${inv.currency} ${Number(inv.requestedAmount).toLocaleString('en-IN')}` : '—'}</td>
+                <td className="amount">{gbp(inv.amount, inv.currency)}</td>
+                <td className="amount">{inv.requestedAmount != null ? gbp(inv.requestedAmount, inv.currency) : '—'}</td>
                 <td><span className={`badge ${inv.status}`}>{inv.status}</span></td>
                 <td className="sub">{new Date(inv.registeredAt).toLocaleString()}</td>
                 <td><button className="btn" disabled={busy}

@@ -20,10 +20,10 @@ const crypto = require('crypto');
 const FILE = path.join(__dirname, 'data', 'ledger.json');
 
 const sha256 = s => crypto.createHash('sha256').update(s).digest('hex');
-const fingerprint = (num, vrn, amount) =>
-    sha256(`${String(num).trim().toUpperCase()}|${String(vrn).trim().toUpperCase()}|${Number(amount)}`);
-const numberKey = (num, vrn) =>
-    sha256(`${String(num).trim().toUpperCase()}|${String(vrn).trim().toUpperCase()}`);
+const fingerprint = (num, crn, amount) =>
+    sha256(`${String(num).trim().toUpperCase()}|${String(crn).trim().toUpperCase()}|${Number(amount)}`);
+const numberKey = (num, crn) =>
+    sha256(`${String(num).trim().toUpperCase()}|${String(crn).trim().toUpperCase()}`);
 
 function loadChain() {
     if (!fs.existsSync(FILE)) return [];
@@ -55,22 +55,22 @@ module.exports = function mockLedger() {
     // ----- the rules (identical to chaincode) applied to in-memory state -----
     function applyWrite(fn, args, txId, timestamp) {
         if (fn === 'RegisterInvoice') {
-            const [invoiceId, invoiceNumber, supplierName, supplierVRN,
+            const [invoiceId, invoiceNumber, supplierName, supplierCRN,
                    payerName, amount, requestedAmount, currency, invoiceDate, dueDate, docHashes] = args;
 
             if (store.has(invoiceId)) throw new Error(`Invoice id ${invoiceId} already exists`);
 
             // R1 "one number, one registration": ANY prior invoice with the same
-            // (invoiceNumber, supplierVRN) — same or different amount — is rejected.
+            // (invoiceNumber, supplierCRN) — same or different amount — is rejected.
             // Uniqueness is scoped per supplier on purpose: two different suppliers
             // may legitimately use the same invoice number.
-            const fp = fingerprint(invoiceNumber, supplierVRN, amount);
-            const nk = numberKey(invoiceNumber, supplierVRN);
+            const fp = fingerprint(invoiceNumber, supplierCRN, amount);
+            const nk = numberKey(invoiceNumber, supplierCRN);
             if (nums.has(nk)) {
                 const prev = nums.get(nk);
                 let msg =
                     `DUPLICATE INVOICE BLOCKED: invoice number ${invoiceNumber} has already been ` +
-                    `registered by supplier ${supplierVRN} (ledger record: ${prev.invoiceId}, ` +
+                    `registered by supplier ${supplierCRN} (ledger record: ${prev.invoiceId}, ` +
                     `amount ${prev.amount}, registered ${prev.registeredAt}). ` +
                     `This submission has amount ${Number(amount)}. An invoice number cannot be reused.`;
                 if (Number(amount) !== Number(prev.amount)) msg += ' Possible tampered or fake invoice.';
@@ -115,7 +115,7 @@ module.exports = function mockLedger() {
             const docHash = docs.invoiceCopy;
             const inv = {
                 docType: 'invoice',
-                invoiceId, invoiceNumber, supplierName, supplierVRN, payerName,
+                invoiceId, invoiceNumber, supplierName, supplierCRN, payerName,
                 amount: faceAmount, requestedAmount: reqAmount, currency,
                 invoiceDate, dueDate, docHash, docs,
                 status: 'REGISTERED', registeredAt: timestamp,

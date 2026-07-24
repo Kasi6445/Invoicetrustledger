@@ -9,25 +9,30 @@ function load() {
     if (!fs.existsSync(FILE)) {
         // seed: sensitive party data (never stored on-chain — only hashes go on-chain)
         const seed = {
+            // Supplier profiles key off the Companies House CRN (primary entity key).
             supplierProfiles: {
-                VRN123456: {
-                    legalName: 'Sri Lakshmi Textiles Pvt Ltd',
-                    bankName: 'HDFC Bank',
-                    bankAccount: '004512349876',
-                    ifsc: 'HDFC0001234',   // Indian bank routing code (was a UK sortCode)
-                    businessContact: 'accounts@srilakshmitextiles.in',
-                    kycDocRef: 'vault://kyc/VRN123456/directors-id.pdf'
+                '09876543': {
+                    legalName: 'Pennine Textiles Ltd',
+                    vatNumber: 'GB402317654',
+                    registeredOffice: 'Unit 4, Pennine Business Park, Huddersfield HD1 3AL',
+                    bankName: 'NatWest',
+                    bankAccount: '12345678',        // 8-digit UK account number
+                    sortCode: '30-96-26',           // 6-digit UK sort code
+                    businessContact: 'accounts@penninetextiles.co.uk',
+                    cddRecordRef: 'vault://cdd/09876543/psc-verification.pdf'
                 }
             },
             // Payer profiles key off payerName. The commercial terms and rating
             // here drive the lender's credit decision; the payer sees their own.
             payerProfiles: {
-                'BigRetail Ltd': {
-                    legalName: 'BigRetail India Pvt Ltd',
+                'Northfield Retail Group plc': {
+                    legalName: 'Northfield Retail Group plc',
+                    crn: '04567890',
+                    vatNumber: 'GB987654321',
                     paymentTerms: 'Net 60',
                     payerRating: 'AA-',
-                    programLimit: 50000000,                 // ₹5 crore anchor programme limit
-                    settlementAccount: 'ICIC0004417 / 50200098761234'
+                    programLimit: 5000000,                  // £5m anchor programme limit
+                    settlementAccount: '30-96-27 / 87654321'
                 }
             },
             docs: {}   // invoiceId -> { invoiceCopy: {fileName, sha256}, purchaseOrder: {...}, goodsReceived: {...} }

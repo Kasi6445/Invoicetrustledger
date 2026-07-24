@@ -24,15 +24,15 @@ class InvoiceContract extends Contract {
 
     // The invoice "fingerprint": unique invoice identity.
     // Same invoice number + same supplier + same amount => same fingerprint, always.
-    _fingerprint(invoiceNumber, supplierVRN, amount) {
-        const raw = `${invoiceNumber.trim().toUpperCase()}|${supplierVRN.trim().toUpperCase()}|${Number(amount)}`;
+    _fingerprint(invoiceNumber, supplierCRN, amount) {
+        const raw = `${invoiceNumber.trim().toUpperCase()}|${supplierCRN.trim().toUpperCase()}|${Number(amount)}`;
         return crypto.createHash('sha256').update(raw).digest('hex');
     }
 
     // Hash of number+supplier ONLY — the uniqueness key: an invoice number
     // may be used once per supplier, regardless of amount.
-    _numberKeyHash(invoiceNumber, supplierVRN) {
-        const raw = `${invoiceNumber.trim().toUpperCase()}|${supplierVRN.trim().toUpperCase()}`;
+    _numberKeyHash(invoiceNumber, supplierCRN) {
+        const raw = `${invoiceNumber.trim().toUpperCase()}|${supplierCRN.trim().toUpperCase()}`;
         return crypto.createHash('sha256').update(raw).digest('hex');
     }
 
@@ -54,7 +54,7 @@ class InvoiceContract extends Contract {
     }
 
     // ---------- STEP 1: REGISTER (supplier) ----------
-    async RegisterInvoice(ctx, invoiceId, invoiceNumber, supplierName, supplierVRN,
+    async RegisterInvoice(ctx, invoiceId, invoiceNumber, supplierName, supplierCRN,
         payerName, amount, requestedAmount, currency, invoiceDate, dueDate, docHashes) {
 
         // Rule 0: id not already used
@@ -64,17 +64,17 @@ class InvoiceContract extends Contract {
         }
 
         // R1 "one number, one registration": ANY prior invoice with the same
-        // (invoiceNumber, supplierVRN) — same or different amount — is rejected.
+        // (invoiceNumber, supplierCRN) — same or different amount — is rejected.
         // Uniqueness is scoped per supplier on purpose: two different suppliers
         // may legitimately use the same invoice number.
-        const fp = this._fingerprint(invoiceNumber, supplierVRN, amount);
-        const numKey = `NUM_${this._numberKeyHash(invoiceNumber, supplierVRN)}`;
+        const fp = this._fingerprint(invoiceNumber, supplierCRN, amount);
+        const numKey = `NUM_${this._numberKeyHash(invoiceNumber, supplierCRN)}`;
         const numState = await ctx.stub.getState(numKey);
         if (numState && numState.length > 0) {
             const prev = JSON.parse(numState.toString());
             let msg =
                 `DUPLICATE INVOICE BLOCKED: invoice number ${invoiceNumber} has already been ` +
-                `registered by supplier ${supplierVRN} (ledger record: ${prev.invoiceId}, ` +
+                `registered by supplier ${supplierCRN} (ledger record: ${prev.invoiceId}, ` +
                 `amount ${prev.amount}, registered ${prev.registeredAt}). ` +
                 `This submission has amount ${Number(amount)}. An invoice number cannot be reused.`;
             if (Number(amount) !== Number(prev.amount)) msg += ' Possible tampered or fake invoice.';
@@ -125,7 +125,7 @@ class InvoiceContract extends Contract {
         const docHash = docs.invoiceCopy;
         const invoice = {
             docType: 'invoice',
-            invoiceId, invoiceNumber, supplierName, supplierVRN, payerName,
+            invoiceId, invoiceNumber, supplierName, supplierCRN, payerName,
             amount: faceAmount, requestedAmount: reqAmount, currency,
             invoiceDate, dueDate,
             docHash,                    // == docs.invoiceCopy — the invoice-copy proof

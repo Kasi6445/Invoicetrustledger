@@ -13,7 +13,7 @@ The rule lives in the ledger, not the app: the contract itself rejects any FundI
 That's the standard test-network topology; production adds one org per party with its own peer, and the chaincode is unchanged. Today business roles are enforced in the app layer (JWT) plus invariants in chaincode; production uses Fabric's attribute-based access control tied to certificates.
 
 **"Why Fabric over Ethereum?"**
-Banks need permissioned membership, data privacy, and predictable costs with no gas token — which is exactly the permissioned model Fabric was built for and, notably, the model GCUL itself uses (KYC-verified participants, fees invoiced, not gas).
+Banks need permissioned membership, data privacy, and predictable costs with no gas token — which is exactly the permissioned model Fabric was built for and, notably, the model GCUL itself uses (CDD-verified participants, fees invoiced, not gas).
 
 **"How does the lender know the PDF wasn't swapped after registration?"**
 Recompute the file's SHA-256 and compare it with the on-chain `docHash` — a one-line check. The document lives off-chain; only its fingerprint is on the ledger.
@@ -28,7 +28,7 @@ Document-hash matching flags the identical PDF instantly; supplier+payer+amount 
 Deliberately not a black box: it's rule-based and every point is derived from the ledger (payer approval, anchored document, due-date window, amount band, lender declines) — expand any grade and read the reasons. The AI in the system is the Gemini document extraction.
 
 **"What's mocked?"**
-Honestly scoped: cloud deployment (runs locally in Docker — cloud-deployable), ERP/core-banking/UPI/KYC integrations (stubbed), and OAuth2/OIDC (simple JWT logins — OIDC-ready). The ledger, the contract rules, the role masking and the AI extraction are real.
+Honestly scoped: cloud deployment (runs locally in Docker — cloud-deployable), ERP/core-banking/payments/CDD integrations (stubbed), and OAuth2/OIDC (simple JWT logins — OIDC-ready). The ledger, the contract rules, the role masking and the AI extraction are real.
 
 **"Can this scale / go multi-currency?"**
 The ledger stores small proofs, so volume is cheap; currency is already a field. Scale-out is an org-per-party Fabric network or GCUL, which is built as a managed, planet-scale service — our adapter design is what makes that a swap rather than a rewrite.

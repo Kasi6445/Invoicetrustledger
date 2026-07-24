@@ -2,6 +2,9 @@ import { useEffect, useState } from 'react';
 import { listInvoices, fundInvoice, declineInvoice, getHistory, getPaymentInstructions } from './api';
 import AuditTrail from './AuditTrail';
 
+const gbp = (v, currency = 'GBP') =>
+  Number(v).toLocaleString('en-GB', { style: 'currency', currency: currency || 'GBP' });
+
 export default function LenderView({ me }) {
   const [invoices, setInvoices] = useState([]);
   const [blocked, setBlocked] = useState(null);   // the rejection message
@@ -130,7 +133,7 @@ export default function LenderView({ me }) {
                 <td>{inv.invoiceNumber}<div className="sub">{inv.invoiceId}</div></td>
                 <td>{inv.supplierName}
                   <div className="sub">a/c {inv.supplierProfile?.bankAccount || '—'}</div></td>
-                <td className="amount">{inv.currency} {Number(inv.amount).toLocaleString('en-IN')}</td>
+                <td className="amount">{gbp(inv.amount, inv.currency)}</td>
                 <td>
                   {inv.payerProfile
                     ? <span>{inv.payerProfile.paymentTerms || '—'}
@@ -176,7 +179,7 @@ export default function LenderView({ me }) {
           </tbody>
         </table>
         <p className="sub" style={{ marginBottom: 0 }}>
-          Risk grades are rule-based and ledger-derived — expand a grade to see every reason. KYC references are masked; bank account shown last-4 only.
+          Risk grades are rule-based and ledger-derived — expand a grade to see every reason. CDD records are masked; bank account shown last-4 only.
         </p>
       </div>
 
@@ -194,8 +197,8 @@ export default function LenderView({ me }) {
                 <div>Beneficiary: {payInfo.beneficiary}</div>
                 <div>Bank: {payInfo.bankName}</div>
                 <div>Account: {payInfo.bankAccount}</div>
-                <div>IFSC: {payInfo.ifsc}</div>
-                <div>Disburse: {payInfo.currency} {Number(payInfo.amount).toLocaleString('en-IN')}</div>
+                <div>Sort code: {payInfo.sortCode}</div>
+                <div>Disburse: {gbp(payInfo.amount, payInfo.currency)}</div>
                 <p className="sub" style={{ marginTop: 10 }}>
                   Released to you as the financing institution — the ledger gates these
                   details so no other lender can read them.

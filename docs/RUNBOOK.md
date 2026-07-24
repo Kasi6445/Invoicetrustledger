@@ -40,7 +40,7 @@ npm run dev                   # open http://localhost:5173
 ```
 
 Click through the whole demo now (script in DEMO_SCRIPT.md):
-supplier1 register → payer1 approve → lloyds fund → **otherbank fund → red DUPLICATE FINANCING BLOCKED banner** → audit trail → "verify ledger" pill in the header.
+supplier1 register → payer1 approve → lloyds fund → **meridian fund → red DUPLICATE FINANCING BLOCKED banner** → audit trail → "verify ledger" pill in the header.
 
 ✅ Day 1 gate: test-flow.sh all green + you performed the kill shot in the browser.
 **From this moment you always have a demo.** Everything after is upgrade, not risk.
@@ -92,7 +92,7 @@ peer chaincode invoke -o localhost:7050 --ordererTLSHostnameOverride orderer.exa
   -C mychannel -n invoicecc \
   --peerAddresses localhost:7051 --tlsRootCertFiles "${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt" \
   --peerAddresses localhost:9051 --tlsRootCertFiles "${PWD}/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt" \
-  -c '{"function":"RegisterInvoice","Args":["inv-cli-001","INV-CLI-001","Sri Lakshmi Textiles","VRN123456","BigRetail Ltd","500000","450000","INR","2026-07-05","2026-08-30","{}"]}'
+  -c '{"function":"RegisterInvoice","Args":["inv-cli-001","INV-CLI-001","Pennine Textiles Ltd","09876543","Northfield Retail Group plc","500000","450000","GBP","2026-07-05","2026-08-30","{}"]}'
 
 sleep 2
 peer chaincode query -C mychannel -n invoicecc -c '{"function":"ReadInvoice","Args":["inv-cli-001"]}'
@@ -100,14 +100,14 @@ peer chaincode query -C mychannel -n invoicecc -c '{"function":"ReadInvoice","Ar
 # Duplicate check. Re-running the SAME invoke verbatim is NOT the right test: it
 # trips Rule 0 ("Invoice id inv-cli-001 already exists"), which is checked before
 # the number check and only proves the ledger key is taken. To exercise R1 you need
-# a DIFFERENT invoiceId carrying the same invoiceNumber + supplierVRN (amount is
+# a DIFFERENT invoiceId carrying the same invoiceNumber + supplierCRN (amount is
 # irrelevant — the number itself is single-use per supplier):
 peer chaincode invoke -o localhost:7050 --ordererTLSHostnameOverride orderer.example.com --tls \
   --cafile "${PWD}/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem" \
   -C mychannel -n invoicecc \
   --peerAddresses localhost:7051 --tlsRootCertFiles "${PWD}/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt" \
   --peerAddresses localhost:9051 --tlsRootCertFiles "${PWD}/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt" \
-  -c '{"function":"RegisterInvoice","Args":["inv-cli-002","INV-CLI-001","Sri Lakshmi Textiles","VRN123456","BigRetail Ltd","500000","450000","INR","2026-07-05","2026-08-30","{}"]}'
+  -c '{"function":"RegisterInvoice","Args":["inv-cli-002","INV-CLI-001","Pennine Textiles Ltd","09876543","Northfield Retail Group plc","500000","450000","GBP","2026-07-05","2026-08-30","{}"]}'
 # → must FAIL with DUPLICATE INVOICE BLOCKED ✅
 # (11 positional args now: … amount, requestedAmount, currency, invoiceDate, dueDate, docHashes;
 #  pass {} for docHashes — nested JSON inside -c '{"Args":[…]}' is quote-hell in bash.)
@@ -161,7 +161,7 @@ cd ~/invoice-trust-ledger/portal && npm run dev
 # After editing api/*.js or the chaincode later, re-run `bash restart.sh` (not a bare node).
 ```
 
-1. Print both files in `docs/test-invoices/` to PDF (clean ₹5,00,000 + tampered ₹7,50,000). Keep on desktop.
+1. Print both files in `docs/test-invoices/` to PDF (clean £85,000 + tampered £127,500). Keep on desktop.
 2. Run DEMO_SCRIPT.md end-to-end ×3, timed under 7 min. The tampered PDF at step 6 is rejected live: DUPLICATE INVOICE BLOCKED … Possible tampered or fake invoice.
 3. Reset drill once: full down → up → deploy → seed → demo in under 10 min.
 4. Screen-record one perfect run (backup video on phone + pen drive).

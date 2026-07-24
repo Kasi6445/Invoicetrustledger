@@ -37,10 +37,10 @@ function validateRegister(req, res, next) {
         && !/^\d{4}-\d{2}-\d{2}$/.test(String(b.invoiceDate).trim()))
         fields.invoiceDate = 'invoiceDate must be in YYYY-MM-DD format';
 
-    // currency defaults to INR server-side when omitted; if sent, it must be a 3-letter code
+    // currency defaults to GBP server-side when omitted; if sent, it must be a 3-letter code
     if (b.currency !== undefined && b.currency !== null && String(b.currency).trim() !== ''
         && !/^[A-Za-z]{3}$/.test(String(b.currency).trim()))
-        fields.currency = 'currency must be a 3-letter code (e.g. INR)';
+        fields.currency = 'currency must be a 3-letter code (e.g. GBP)';
 
     if (!b.dueDate || !/^\d{4}-\d{2}-\d{2}$/.test(String(b.dueDate).trim()))
         fields.dueDate = 'dueDate must be in YYYY-MM-DD format';

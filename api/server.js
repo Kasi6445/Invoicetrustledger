@@ -60,9 +60,11 @@ app.post('/auth/login', loginLimiter, (req, res, next) => {
     const u = users.find(x => x.username === username && x.password === password);
     if (!u) return next(new ApiError(401, 'AUTH_INVALID', 'Invalid credentials'));
     const token = jwt.sign(
-        { username: u.username, role: u.role, displayName: u.displayName, vrn: u.vrn || null },
+        { username: u.username, role: u.role, displayName: u.displayName,
+          supplierCRN: u.supplierCRN || null, payerId: u.payerId || null },
         process.env.JWT_SECRET, { expiresIn: '8h' });
-    res.json({ token, role: u.role, displayName: u.displayName, vrn: u.vrn || null });
+    res.json({ token, role: u.role, displayName: u.displayName,
+               supplierCRN: u.supplierCRN || null, payerId: u.payerId || null });
 });
 
 function auth(...roles) {
@@ -108,9 +110,9 @@ app.post('/invoices', auth('supplier'), registerUpload, validateRegister, async 
 
         const ledger = await getLedger();
         const result = await ledger.submit('RegisterInvoice',
-            invoiceId, b.invoiceNumber, req.user.displayName, req.user.vrn,
+            invoiceId, b.invoiceNumber, req.user.displayName, req.user.supplierCRN,
             b.payerName, String(b.amount), String(b.requestedAmount),
-            b.currency || 'INR', b.invoiceDate || '', b.dueDate,
+            b.currency || 'GBP', b.invoiceDate || '', b.dueDate,
             JSON.stringify(docHashes));
 
         // Ledger accepted — now persist the off-chain artefacts.
@@ -159,7 +161,7 @@ app.post('/invoices/:id/decline', auth('lender'), async (req, res, next) => {
         const inv = JSON.parse(await ledger.submit('DeclineInvoice', req.params.id, req.user.displayName, reason));
         const all = JSON.parse(await ledger.evaluate('GetAllInvoices'));
         const db = offchain.load();
-        res.json(maskForRole(riskScore(withGoods(inv, db), all, db.payerProfiles[inv.payerName]), db.supplierProfiles[inv.supplierVRN], db.payerProfiles[inv.payerName], req.user.role, req.user.displayName));
+        res.json(maskForRole(riskScore(withGoods(inv, db), all, db.payerProfiles[inv.payerName]), db.supplierProfiles[inv.supplierCRN], db.payerProfiles[inv.payerName], req.user.role, req.user.displayName));
     } catch (e) { next(new ApiError(409, 'LEDGER_REJECTED', e.message)); }
 });
 
@@ -197,7 +199,7 @@ app.get('/invoices', auth(), async (req, res, next) => {
         const all = JSON.parse(await ledger.evaluate('GetAllInvoices'));
         const db = offchain.load();
         res.json(all.map(inv =>
-            maskForRole(riskScore(withGoods(inv, db), all, db.payerProfiles[inv.payerName]), db.supplierProfiles[inv.supplierVRN], db.payerProfiles[inv.payerName], req.user.role, req.user.displayName)));
+            maskForRole(riskScore(withGoods(inv, db), all, db.payerProfiles[inv.payerName]), db.supplierProfiles[inv.supplierCRN], db.payerProfiles[inv.payerName], req.user.role, req.user.displayName)));
     } catch (e) { next(e); }
 });
 
@@ -208,7 +210,7 @@ app.get('/invoices/:id', auth(), async (req, res, next) => {
         // Similarity flags need the whole list — fine at prototype scale.
         const all = JSON.parse(await ledger.evaluate('GetAllInvoices'));
         const db = offchain.load();
-        res.json(maskForRole(riskScore(withGoods(inv, db), all, db.payerProfiles[inv.payerName]), db.supplierProfiles[inv.supplierVRN], db.payerProfiles[inv.payerName], req.user.role, req.user.displayName));
+        res.json(maskForRole(riskScore(withGoods(inv, db), all, db.payerProfiles[inv.payerName]), db.supplierProfiles[inv.supplierCRN], db.payerProfiles[inv.payerName], req.user.role, req.user.displayName));
     } catch (e) { next(new ApiError(404, 'NOT_FOUND', e.message)); }
 });
 
@@ -235,7 +237,7 @@ app.get('/invoices/:id/doc/:type', auth('supplier', 'payer', 'lender'), async (r
 
         const ledger = await getLedger();
         const inv = JSON.parse(await ledger.evaluate('ReadInvoice', id));
-        if (req.user.role === 'supplier' && inv.supplierVRN !== req.user.vrn)
+        if (req.user.role === 'supplier' && inv.supplierCRN !== req.user.supplierCRN)
             return next(new ApiError(403, 'FORBIDDEN', 'Not your invoice'));
 
         const db = offchain.load();
@@ -270,14 +272,14 @@ app.get('/invoices/:id/payment-instructions', auth('lender'), async (req, res, n
                 'Payment instructions are released only to the institution that financed this invoice' + suffix));
         }
         const db = offchain.load();
-        const sp = db.supplierProfiles[inv.supplierVRN] || {};
+        const sp = db.supplierProfiles[inv.supplierCRN] || {};
         res.json({
             invoiceId: inv.invoiceId,
             invoiceNumber: inv.invoiceNumber,
             beneficiary: sp.legalName || inv.supplierName,
             bankName: sp.bankName || null,
             bankAccount: sp.bankAccount || null,   // full, unmasked — funder entitlement
-            ifsc: sp.ifsc || null,
+            sortCode: sp.sortCode || null,
             amount: inv.requestedAmount,
             currency: inv.currency
         });
@@ -335,8 +337,8 @@ async function autoSeed() {
         const reg = (id, number, amount, requestedAmount, invoiceDate, dueDate) => {
             const docHash = crypto.createHash('sha256').update('seed-doc-' + number).digest('hex');
             return ledger.submit('RegisterInvoice',
-                id, number, supplier.displayName, supplier.vrn,
-                payer.displayName, amount, requestedAmount, 'INR', invoiceDate, dueDate,
+                id, number, supplier.displayName, supplier.supplierCRN,
+                payer.displayName, amount, requestedAmount, 'GBP', invoiceDate, dueDate,
                 JSON.stringify({ invoiceCopy: docHash }));
         };
         const a = 'inv-' + Date.now(), b = 'inv-' + (Date.now() + 1);

@@ -29,7 +29,7 @@
                                │
         on-chain: proofs only (status, hashes, timestamps, actors)
         off-chain: api/offchain.js (data/offchain.json) + data/docs/
-                   bank details, KYC refs, uploaded documents —
+                   bank details, CDD records, uploaded documents —
                    the chain holds only their SHA-256
 ```
 
@@ -75,6 +75,6 @@ identically.
 - **API → ledger**: trusted transport, untrusted *content* — the ledger
   re-checks every business rule regardless of what the API sends.
 - **On-chain vs off-chain**: the chain stores proofs (hashes, statuses,
-  timestamps, actor names). Documents and bank/KYC data stay off-chain; anyone
+  timestamps, actor names). Documents and bank/CDD data stay off-chain; anyone
   can verify a document by recomputing its SHA-256 against the on-chain
   `docHash`.

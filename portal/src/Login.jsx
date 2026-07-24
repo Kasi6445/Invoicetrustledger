@@ -2,10 +2,10 @@ import { useState } from 'react';
 import { login } from './api';
 
 const ROLES = [
-  { username: 'supplier1', role: 'Supplier', name: 'Sri Lakshmi Textiles', desc: 'Registers invoices on the ledger' },
-  { username: 'payer1',    role: 'Payer',    name: 'BigRetail Ltd',        desc: 'Confirms invoices are genuine' },
-  { username: 'lloyds',    role: 'Lender',   name: 'Lloyds Bank',          desc: 'Verifies risk and finances invoices' },
-  { username: 'otherbank', role: 'Lender',   name: 'OtherBank NBFC',       desc: 'A second lender — tries the same invoice' },
+  { username: 'supplier1', role: 'Supplier', name: 'Pennine Textiles Ltd',            desc: 'Registers invoices on the ledger' },
+  { username: 'payer1',    role: 'Payer',    name: 'Northfield Retail Group plc',     desc: 'Confirms invoices are genuine' },
+  { username: 'lloyds',    role: 'Lender',   name: 'Lloyds Bank Commercial Banking',  desc: 'Verifies risk and finances invoices' },
+  { username: 'meridian',  role: 'Lender',   name: 'Meridian Invoice Finance Ltd',    desc: 'A second lender — tries the same invoice' },
 ];
 
 export default function Login({ onLogin }) {

@@ -11,12 +11,12 @@ import * as fs from 'fs';
  *   1. Supplier uploads the invoice copy + fills the form  (register form)
  *   2. Supplier registers    -> REGISTERED on the ledger, docHash anchored
  *   3. Payer approves        -> APPROVED
- *   4. Second lender (OtherBank) opens its console while APPROVED (fund live)
+ *   4. Second lender (Meridian) opens its console while APPROVED (fund live)
  *   5. Lloyds funds          -> FINANCED (+ masked a/c pre-fund, risk grade)
  *   5b. Lloyds (the funder) opens Payment instructions -> FULL bank details
  *       (CR01 entitlement unlock)
- *   6. OtherBank clicks its stale Fund -> RED BANNER "DUPLICATE FINANCING
- *      BLOCKED … another financial institution" + OtherBank still sees the
+ *   6. Meridian clicks its stale Fund -> RED BANNER "DUPLICATE FINANCING
+ *      BLOCKED … another financial institution" + Meridian still sees the
  *      supplier bank MASKED (non-funder)                          <- KILL SHOT
  *   7. Audit trail modal     -> immutable history with real txIds
  *   8. Fake resubmission: same number, different amount -> BLOCKED at
@@ -38,13 +38,13 @@ const EVIDENCE = path.join(__dirname, '..', 'evidence');
 const RUN = Date.now();
 const INV_NO = `INV-E2E-${RUN}`; // unique per run -> repeatable suite
 
-const FULL_BANK_ACCOUNT = '004512349876'; // funder-only; never for payer / non-funder
-const MASKED_BANK = '••••9876';
+const FULL_BANK_ACCOUNT = '12345678'; // funder-only; never for payer / non-funder
+const MASKED_BANK = '••••5678';
 
 // Deterministic stub for /ai/extract — no live Gemini, no quota spent.
 const STUB_EXTRACT = {
-  invoiceNumber: 'INV-2026-007', supplierName: 'Sri Lakshmi Textiles Pvt Ltd',
-  supplierVRN: 'VRN123456', payerName: 'BigRetail Ltd', amount: 500000, currency: 'INR',
+  invoiceNumber: 'INV-2026-007', supplierName: 'Pennine Textiles Ltd',
+  supplierCRN: '09876543', payerName: 'Northfield Retail Group plc', amount: 500000, currency: 'GBP',
   invoiceDate: '2026-07-01', dueDate: '2026-08-30',
   goodsDescription: '200 bales cotton yarn, 40s count', poNumber: 'PO-BR-2026-3391',
   simulated: true, note: 'stubbed in e2e',
@@ -97,10 +97,10 @@ async function fillRegisterForm(page: Page, o: {
 }) {
   if (o.pdf) await page.locator('input[type="file"]').first().setInputFiles(o.pdf);
   await field(page, /invoice ?number/i, 'invoiceNumber').fill(o.invoiceNumber);
-  await fillSmart(field(page, /payer/i, 'payerName'), 'BigRetail Ltd');
+  await fillSmart(field(page, /payer/i, 'payerName'), 'Northfield Retail Group plc');
   await field(page, /amount/i, 'amount').fill(o.amount);
   await field(page, /financing requested/i, 'requestedAmount').fill(o.requestedAmount);
-  await fillSmart(field(page, /currency/i, 'currency'), 'INR');
+  await fillSmart(field(page, /currency/i, 'currency'), 'GBP');
   if (o.invoiceDate) await fillSmart(field(page, /invoice date/i, 'invoiceDate'), o.invoiceDate);
   await fillSmart(field(page, /due ?date/i, 'dueDate'), o.dueDate);
 }
@@ -127,7 +127,7 @@ test('full invoice lifecycle: register → approve → fund → payment-instruct
   await stubGemini(page);
 
   await test.step('1. SUPPLIER: upload invoice copy + fill the register form', async () => {
-    await loginAs(page, /supplier|sri lakshmi/i);
+    await loginAs(page, /supplier|pennine/i);
     // First file input is the OCR dropzone (invoiceCopy) — upload drives the
     // on-chain docHash. /ai/extract is stubbed, so no live Gemini.
     await page.locator('input[type="file"]').first().setInputFiles(PDF);
@@ -153,7 +153,7 @@ test('full invoice lifecycle: register → approve → fund → payment-instruct
 
   await test.step('3. PAYER: approve -> APPROVED', async () => {
     await logout(page);
-    await loginAs(page, /payer|bigretail/i);
+    await loginAs(page, /payer|northfield/i);
     const row = page.locator('tr').filter({ hasText: INV_NO }).first();
     await expect(row).toBeVisible({ timeout: 15_000 });
     await row.getByRole('button', { name: /approve/i }).click();
@@ -163,19 +163,19 @@ test('full invoice lifecycle: register → approve → fund → payment-instruct
     await shot(page, 'payer-approved');
   });
 
-  // Open OtherBank's console NOW, while APPROVED, so its Fund button is live.
+  // Open Meridian's console NOW, while APPROVED, so its Fund button is live.
   const otherCtx = await browser.newContext({
     baseURL: 'http://localhost:5173', viewport: { width: 1280, height: 800 },
     recordVideo: { dir: testInfo.outputPath('otherbank-video'), size: { width: 1280, height: 800 } },
   });
   const otherPage = await otherCtx.newPage();
 
-  await test.step('4. SECOND LENDER (OtherBank): console open, Fund button live', async () => {
-    await loginAs(otherPage, /other ?bank/i);
+  await test.step('4. SECOND LENDER (Meridian): console open, Fund button live', async () => {
+    await loginAs(otherPage, /meridian/i);
     const otherRow = otherPage.locator('tr').filter({ hasText: INV_NO }).first();
     await expect(otherRow).toBeVisible({ timeout: 15_000 });
     await expect(otherRow.getByRole('button', { name: /fund invoice/i }),
-      'OtherBank sees an APPROVED, fundable invoice — the fraud window is open').toBeEnabled();
+      'Meridian sees an APPROVED, fundable invoice — the fraud window is open').toBeEnabled();
   });
 
   await test.step('5. LLOYDS: verify masking pre-fund, then fund -> FINANCED', async () => {
@@ -193,7 +193,7 @@ test('full invoice lifecycle: register → approve → fund → payment-instruct
     await expect
       .poll(async () => (await apiState(fetch, INV_NO))[0]?.status, { timeout: 30_000, message: 'ledger -> FINANCED' })
       .toBe('FINANCED');
-    expect((await apiState(fetch, INV_NO))[0].financedBy).toBe('Lloyds Bank');
+    expect((await apiState(fetch, INV_NO))[0].financedBy).toBe('Lloyds Bank Commercial Banking');
 
     await page.getByRole('button', { name: /funded by me/i }).click();
     const fundedRow = page.locator('tr').filter({ hasText: INV_NO }).first();
@@ -206,19 +206,19 @@ test('full invoice lifecycle: register → approve → fund → payment-instruct
     const fundedRow = page.locator('tr').filter({ hasText: INV_NO }).first();
     await fundedRow.getByRole('button', { name: /payment instructions/i }).click();
     // CR01 entitlement unlock: the funder — and only the funder — sees the
-    // supplier's real account + IFSC. Scope to the modal (the funder also sees
+    // supplier's real account + sort code. Scope to the modal (the funder also sees
     // full accounts inline on other rows it financed).
     const modal = page.locator('.modal');
     await expect(modal.getByRole('heading', { name: /payment instructions/i })).toBeVisible();
     await expect(modal.getByText(FULL_BANK_ACCOUNT)).toBeVisible();
-    await expect(modal.getByText(/HDFC0001234/)).toBeVisible();
+    await expect(modal.getByText(/30-96-26/)).toBeVisible();
     await shot(page, 'lloyds-payment-instructions');
     await page.getByRole('button', { name: /close/i }).click();
   });
 
-  await test.step('6. KILL SHOT: OtherBank clicks its stale Fund -> LEDGER REJECTS (and stays masked)', async () => {
+  await test.step('6. KILL SHOT: Meridian clicks its stale Fund -> LEDGER REJECTS (and stays masked)', async () => {
     const otherRow = otherPage.locator('tr').filter({ hasText: INV_NO }).first();
-    // Non-funder masking: OtherBank never sees the supplier's real account.
+    // Non-funder masking: Meridian never sees the supplier's real account.
     await expect(otherRow.getByText(MASKED_BANK)).toBeVisible();
     await expect(otherPage.getByText(FULL_BANK_ACCOUNT)).toHaveCount(0);
 
@@ -250,7 +250,7 @@ test('full invoice lifecycle: register → approve → fund → payment-instruct
 
   await test.step('8. FAKE RESUBMISSION: same number, different amount -> BLOCKED at registration', async () => {
     await logout(page);
-    await loginAs(page, /supplier|sri lakshmi/i);
+    await loginAs(page, /supplier|pennine/i);
     await fillRegisterForm(page, {
       invoiceNumber: INV_NO, amount: '750000', requestedAmount: '675000', dueDate: '2026-09-15',
       pdf: PDF_TAMPERED,
@@ -267,12 +267,12 @@ test('full invoice lifecycle: register → approve → fund → payment-instruct
 
   await test.step('9. NEGATIVE: the payer (never entitled) never sees the full bank account', async () => {
     await logout(page);
-    await loginAs(page, /payer|bigretail/i);
+    await loginAs(page, /payer|northfield/i);
     // Payer is never a funder — the entitlement unlock must not reach them.
     await expect(page.getByText(FULL_BANK_ACCOUNT)).toHaveCount(0);
   });
   // NOTE: the main-page recording (video:'on') is written to test-results/ by
   // Playwright on context close; it is copied to evidence/full-lifecycle.webm after
   // the run (the fixture page can't be closed mid-test, so it can't self-copy the way
-  // the OtherBank console video does above). The OtherBank clip auto-copies (line ~237).
+  // the Meridian console video does above). The Meridian clip auto-copies (line ~237).
 });

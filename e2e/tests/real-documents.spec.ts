@@ -13,12 +13,12 @@ import * as crypto from 'crypto';
  * MANUALLY (Gemini is stubbed — see below), so these tests never depend on OCR.
  *
  *   R1. SECOND LAYOUT + HASH PROOF — a differently-designed invoice
- *       (INV-2026-014, ₹3,25,000) registers, and the on-chain docHash ===
+ *       (INV-2026-014, £325,000) registers, and the on-chain docHash ===
  *       sha256 of the uploaded file (cryptographic doc-integrity proof).
  *   R2. DUPLICATE INVOICE BLOCKED — register the real INV-2026-007 twice;
  *       the ledger refuses the second registration of the number, on screen.
- *   R3. TAMPERED RESUBMISSION — the tampered twin (same number, ₹7,50,000) is
- *       REJECTED at registration; the lender never sees a ₹7,50,000 row.
+ *   R3. TAMPERED RESUBMISSION — the tampered twin (same number, £750,000) is
+ *       REJECTED at registration; the lender never sees a £750,000 row.
  *   R4. SIMILAR-INVOICE FLAG — the SAME PDF under a NEW number registers, but
  *       the read-time document-hash match flags it (−25, ⚠ similar chip).
  *   OCR. (targeted) uploading the invoice copy autofills the form — the ONE
@@ -42,8 +42,8 @@ const RUN = Date.now();
 const sha256 = (p: string) => crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
 
 const STUB_EXTRACT = {
-  invoiceNumber: 'INV-2026-007', supplierName: 'Sri Lakshmi Textiles Pvt Ltd',
-  supplierVRN: 'VRN123456', payerName: 'BigRetail Ltd', amount: 500000, currency: 'INR',
+  invoiceNumber: 'INV-2026-007', supplierName: 'Pennine Textiles Ltd',
+  supplierCRN: '09876543', payerName: 'Northfield Retail Group plc', amount: 500000, currency: 'GBP',
   invoiceDate: '2026-07-01', dueDate: '2026-08-30',
   goodsDescription: '200 bales cotton yarn, 40s count', poNumber: 'PO-BR-2026-3391',
   simulated: true, note: 'stubbed in e2e',
@@ -90,10 +90,10 @@ async function uploadThenFill(page: Page, pdf: string, o: {
 }) {
   await page.locator('input[type="file"]').first().setInputFiles(pdf);
   await field(page, /invoice ?number/i, 'invoiceNumber').fill(o.invoiceNumber);
-  await fillSmart(field(page, /payer/i, 'payerName'), 'BigRetail Ltd');
+  await fillSmart(field(page, /payer/i, 'payerName'), 'Northfield Retail Group plc');
   await field(page, /amount/i, 'amount').fill(o.amount);
   await field(page, /financing requested/i, 'requestedAmount').fill(o.requestedAmount);
-  await fillSmart(field(page, /currency/i, 'currency'), 'INR');
+  await fillSmart(field(page, /currency/i, 'currency'), 'GBP');
   await fillSmart(field(page, /due ?date/i, 'dueDate'), o.dueDate);
 }
 
@@ -151,7 +151,7 @@ test.describe('Real-document scenarios (fixture PDFs, as-is)', () => {
       `${'='.repeat(70)}\n\n` +
       `invoice-clean-INV-2026-014.pdf\n  sha256(file) = ${fileHash}\n`);
 
-    await loginAs(page, /supplier|sri lakshmi/i);
+    await loginAs(page, /supplier|pennine/i);
     const unique = `INV-014-E2E-${RUN}`;   // unique number so R1 stays repeatable
     await uploadThenFill(page, PDF_014, { invoiceNumber: unique, amount: '325000', requestedAmount: '290000', dueDate: '2026-09-20' });
     await shot(page, 'ocr-second-layout-INV-2026-014');
@@ -168,7 +168,7 @@ test.describe('Real-document scenarios (fixture PDFs, as-is)', () => {
     const fileHash = sha256(PDF_007);
     const preExisting = (await ledgerFindByNumber('INV-2026-007')).length > 0;
 
-    await loginAs(page, /supplier|sri lakshmi/i);
+    await loginAs(page, /supplier|pennine/i);
     await uploadThenFill(page, PDF_007, { invoiceNumber: 'INV-2026-007', amount: '500000', requestedAmount: '450000', dueDate: '2026-08-30' });
     await page.getByRole('button', { name: /register on ledger/i }).click();
 
@@ -177,7 +177,7 @@ test.describe('Real-document scenarios (fixture PDFs, as-is)', () => {
     } else {
       await expect.poll(async () => (await ledgerFind('INV-2026-007', 500000)).length, { timeout: 30_000 }).toBe(1);
       await page.reload();
-      await loginAs(page, /supplier|sri lakshmi/i);
+      await loginAs(page, /supplier|pennine/i);
       await uploadThenFill(page, PDF_007, { invoiceNumber: 'INV-2026-007', amount: '500000', requestedAmount: '450000', dueDate: '2026-08-30' });
       await page.getByRole('button', { name: /register on ledger/i }).click();
       await expectDuplicateBlocked(page, dialogs);
@@ -193,12 +193,12 @@ test.describe('Real-document scenarios (fixture PDFs, as-is)', () => {
     if (!preExisting) expect(matches[0].docHash).toBe(fileHash);
   });
 
-  test('R3 — the TAMPERED twin (₹7.5L, same number): REJECTED at registration', async ({ page }) => {
+  test('R3 — the TAMPERED twin (£750,000, same number): REJECTED at registration', async ({ page }) => {
     const dialogs = armDialogCapture(page);
     const before = await ledgerFindByNumber('INV-2026-007');
     expect(before.length, 'R2 must have left INV-2026-007 on the ledger').toBeGreaterThan(0);
 
-    await loginAs(page, /supplier|sri lakshmi/i);
+    await loginAs(page, /supplier|pennine/i);
     await uploadThenFill(page, PDF_TAMPERED, { invoiceNumber: 'INV-2026-007', amount: '750000', requestedAmount: '675000', dueDate: '2026-09-15' });
     await shot(page, 'tampered-pdf-ocr-inflated-amount');
     await page.getByRole('button', { name: /register on ledger/i }).click();
@@ -223,13 +223,13 @@ test.describe('Real-document scenarios (fixture PDFs, as-is)', () => {
     const twinA = `INV-014-TWIN-${RUN}-A`;
     const twinB = `INV-014-TWIN-${RUN}-B`;
 
-    await loginAs(page, /supplier|sri lakshmi/i);
+    await loginAs(page, /supplier|pennine/i);
     await uploadThenFill(page, PDF_014, { invoiceNumber: twinA, amount: '325000', requestedAmount: '290000', dueDate: '2026-09-20' });
     await page.getByRole('button', { name: /register on ledger/i }).click();
     await expect.poll(async () => (await ledgerFindByNumber(twinA)).length, { timeout: 30_000 }).toBe(1);
 
     await page.reload();
-    await loginAs(page, /supplier|sri lakshmi/i);
+    await loginAs(page, /supplier|pennine/i);
     await uploadThenFill(page, PDF_014, { invoiceNumber: twinB, amount: '325000', requestedAmount: '290000', dueDate: '2026-09-20' });
     await page.getByRole('button', { name: /register on ledger/i }).click();
     await expect.poll(async () => (await ledgerFindByNumber(twinB)).length, { timeout: 30_000 }).toBe(1);
@@ -253,7 +253,7 @@ test.describe('Real-document scenarios (fixture PDFs, as-is)', () => {
   // form from the (stubbed) extraction — proving the upload -> extract ->
   // form-populate wiring without spending live quota.
   test('OCR — uploading the invoice copy autofills the form (stubbed extraction)', async ({ page }) => {
-    await loginAs(page, /supplier|sri lakshmi/i);
+    await loginAs(page, /supplier|pennine/i);
     await page.locator('input[type="file"]').first().setInputFiles(PDF_007);
     await expect(field(page, /invoice ?number/i, 'invoiceNumber'), 'invoice number autofilled').toHaveValue(/INV-2026-007/);
     await expect(field(page, /amount/i, 'amount'), 'amount autofilled').toHaveValue(/500000/);

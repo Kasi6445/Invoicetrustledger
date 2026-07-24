@@ -16,13 +16,14 @@ stale wording is captured in the deviation table below so it can be corrected.
   `{ invoiceCopy, purchaseOrder, goodsReceived }` SHA-256s, parsed defensively;
   stored as `docs`; `docHash` kept as `docs.invoiceCopy || 'no-document'`. Goods
   description is off-chain narrative only.
-- **Off-chain**: `payerProfiles` (BigRetail Ltd: terms/rating/programme
-  limit/settlement account); supplier `sortCode` → `ifsc` + `bankName`; nested
-  `docs` map.
+- **Off-chain**: `payerProfiles` (Northfield Retail Group plc: terms/rating/programme
+  limit/settlement account); supplier bank fields (`sortCode`, `bankName`); nested
+  `docs` map. (The UK-localisation pass later renamed the routing field to `sortCode`
+  and the compliance-document reference to `cddRecordRef` — see the v4 localisation addendum.)
 - **Masking / RBAC**: `maskForRole(invoice, supplierProfile, payerProfile, role,
   viewerName)`. Payer loses `risk`, `requestedAmount`, `payerProfile`; supplier
-  bank last-4 + IFSC masked, KYC restricted. Lender gets full `payerProfile` and
-  risk; supplier bank/IFSC masked **unless this lender funded the invoice**
+  bank last-4 + sort code masked, CDD record restricted. Lender gets full `payerProfile` and
+  risk; supplier bank/sort code masked **unless this lender funded the invoice**
   (entitlement unlock, evaluated on the raw invoice **before** anonymity). v2/v3
   lender anonymity and the similar-invoice flag survive intact.
 - **API**: multi-file upload; `GET /invoices/:id/doc/:type` (whitelisted,
@@ -30,7 +31,7 @@ stale wording is captured in the deviation table below so it can be corrected.
   403 never names the funder, so it can't be used as an oracle).
 - **Risk**: advance-ratio and payer-terms signals; weights sum to 100; grades
   **A≥78 / B≥55 / C**, with a **structural cap: an unrated payer can never grade
-  A (capped at B)** — this is why MegaMart grades B, deliberately, not because of
+  A (capped at B)** — this is why Caledonian Stores grades B, deliberately, not because of
   a one-point margin.
 - **Portal**: supplier requested-amount (client check) + three file inputs (only
   the invoice copy runs OCR) + goods description; payer goods summary + document

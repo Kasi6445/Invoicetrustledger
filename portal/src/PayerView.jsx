@@ -3,6 +3,8 @@ import { listInvoices, approveInvoice, disputeInvoice, getHistory, getDoc } from
 import AuditTrail from './AuditTrail';
 
 const DOC_LABELS = { invoiceCopy: 'Invoice copy', purchaseOrder: 'Purchase order', goodsReceived: 'Goods-received note' };
+const gbp = (v, currency = 'GBP') =>
+  Number(v).toLocaleString('en-GB', { style: 'currency', currency: currency || 'GBP' });
 
 export default function PayerView({ me }) {
   const [invoices, setInvoices] = useState([]);
@@ -74,8 +76,8 @@ export default function PayerView({ me }) {
               <tr key={inv.invoiceId}>
                 <td>{inv.invoiceNumber}<div className="sub">{inv.invoiceId}</div></td>
                 <td>{inv.supplierName}
-                  <div className="sub">a/c {inv.supplierProfile?.bankAccount || '—'} · IFSC {inv.supplierProfile?.ifsc || '—'}</div></td>
-                <td className="amount">{inv.currency} {Number(inv.amount).toLocaleString('en-IN')}</td>
+                  <div className="sub">a/c {inv.supplierProfile?.bankAccount || '—'} · sort {inv.supplierProfile?.sortCode || '—'}</div></td>
+                <td className="amount">{gbp(inv.amount, inv.currency)}</td>
                 <td style={{ maxWidth: 260 }}><GoodsAndDocs inv={inv} /></td>
                 <td className="sub">{inv.dueDate}</td>
                 <td style={{ whiteSpace: 'nowrap' }}>
@@ -88,7 +90,7 @@ export default function PayerView({ me }) {
           </tbody>
         </table>
         <p className="sub" style={{ marginBottom: 0 }}>
-          Field-level access: you see the commercial record and can open every supporting document; the supplier's bank account is masked to last-4, IFSC masked, and lender risk/financing data is not shown to you.
+          Field-level access: you see the commercial record and can open every supporting document; the supplier's bank account is masked to last-4, sort code masked, and lender risk/financing data is not shown to you.
         </p>
       </div>
 
@@ -101,7 +103,7 @@ export default function PayerView({ me }) {
               <tr key={inv.invoiceId}>
                 <td>{inv.invoiceNumber}<div className="sub">{inv.invoiceId}</div></td>
                 <td>{inv.supplierName}</td>
-                <td className="amount">{inv.currency} {Number(inv.amount).toLocaleString('en-IN')}</td>
+                <td className="amount">{gbp(inv.amount, inv.currency)}</td>
                 <td><span className={`badge ${inv.status}`}>{inv.status}</span></td>
                 <td><button className="btn" disabled={busy}
                             onClick={async () => { try { setTrail(await getHistory(inv.invoiceId)); } catch {} }}>Audit trail</button></td>
