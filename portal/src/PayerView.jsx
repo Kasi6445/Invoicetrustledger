@@ -12,6 +12,13 @@ export default function PayerView({ me }) {
   const [trail, setTrail] = useState(null);
   const [busy, setBusy] = useState(false);
 
+  // payerName is free text (supplier types it, or Gemini OCR fills it from the invoice
+  // copy) while displayName is a fixed account constant — so match leniently, and match
+  // through ONE helper so the two lists below can never disagree about whose invoice it is.
+  const samePayer = (inv) =>
+    (inv.payerName || '').trim().toLowerCase() ===
+    (me.displayName || '').trim().toLowerCase();
+
   const refresh = () => listInvoices().then(setInvoices).catch(() => {});
   useEffect(() => { refresh(); }, []);
 
@@ -54,8 +61,11 @@ export default function PayerView({ me }) {
     );
   }
 
-  const pending = invoices.filter(i => i.status === 'REGISTERED' && i.payerName === me.displayName);
-  const rest = invoices.filter(i => !(i.status === 'REGISTERED' && i.payerName === me.displayName));
+  // Both lists are scoped by samePayer; `naming` is the remainder, so a row shows in
+  // exactly one table and the two can't drift apart.
+  const isPending = (inv) => inv.status === 'REGISTERED' && samePayer(inv);
+  const pending = invoices.filter(isPending);
+  const naming = invoices.filter(i => samePayer(i) && !isPending(i));
 
   return (
     <div>
@@ -94,12 +104,13 @@ export default function PayerView({ me }) {
         </p>
       </div>
 
-      <p className="eyebrow">All invoices naming {me.displayName}</p>
+      <p className="eyebrow">Your other invoices</p>
       <div className="card">
         <table>
           <thead><tr><th>Invoice</th><th>Supplier</th><th>Amount</th><th>Status</th><th></th></tr></thead>
           <tbody>
-            {rest.map(inv => (
+            {naming.length === 0 && <tr><td colSpan="5" className="sub">No invoices name you yet.</td></tr>}
+            {naming.map(inv => (
               <tr key={inv.invoiceId}>
                 <td>{inv.invoiceNumber}<div className="sub">{inv.invoiceId}</div></td>
                 <td>{inv.supplierName}</td>

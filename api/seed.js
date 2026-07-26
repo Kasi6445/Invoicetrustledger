@@ -2,9 +2,14 @@
 // Run: node seed.js   (server must be running)
 // Against a hosted deploy: node seed.js https://your-app.onrender.com
 //                      or: API_URL=https://your-app.onrender.com node seed.js
-// Seeds: INV-2026-001 already FINANCED by Lloyds, INV-2026-002 APPROVED and ready to fund,
-// plus two Caledonian Stores Ltd invoices (one REGISTERED, one APPROVED) so the lender
-// console's search box and tabs have a second payer to filter on.
+// One cast throughout: supplier "Pennine Textiles Ltd" (from the supplier1 login — the
+// server takes supplierName off the JWT, never off the request body) and payer
+// "Northfield Retail Group plc", byte-identical to that account's displayName in users.js
+// so the payer console's samePayer match holds.
+// Seeds: INV-2026-001 already FINANCED by Lloyds (the duplicate-financing target),
+// INV-2026-002 APPROVED and ready to fund, INV-2026-003 left REGISTERED (the payer's
+// pending-approval target) and INV-2026-004 APPROVED, giving the lender console's search
+// box and tabs several rows to filter across.
 //
 // The invoice copy is now MANDATORY (server rejects a register with no file), so each
 // invoice is registered as multipart with a document attached. Document assignment is
@@ -56,10 +61,10 @@ const synthDoc = number => ({ buffer: Buffer.from(`seed-doc-${number}`), fileNam
         invoiceDate: '2026-07-20', dueDate: '2026-09-01' }, synthDoc('INV-2026-002'), s);
     await post(`/invoices/${b.invoiceId}/approve`, {}, p);              // one ready-to-fund example
 
-    const c = await register({ invoiceNumber: 'INV-2026-003', payerName: 'Caledonian Stores Ltd',
+    const c = await register({ invoiceNumber: 'INV-2026-003', payerName: 'Northfield Retail Group plc',
         amount: 180000, requestedAmount: 150000, currency: 'GBP',
         invoiceDate: '2026-08-01', dueDate: '2026-09-20' }, synthDoc('INV-2026-003'), s);  // search-demo: REGISTERED
-    const d = await register({ invoiceNumber: 'INV-2026-004', payerName: 'Caledonian Stores Ltd',
+    const d = await register({ invoiceNumber: 'INV-2026-004', payerName: 'Northfield Retail Group plc',
         amount: 620000, requestedAmount: 550000, currency: 'GBP',
         invoiceDate: '2026-08-10', dueDate: '2026-10-05' }, synthDoc('INV-2026-004'), s);
     await post(`/invoices/${d.invoiceId}/approve`, {}, p);              // search-demo: ready to fund
