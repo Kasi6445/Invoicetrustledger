@@ -1,10 +1,10 @@
 /* Invoice Trust Ledger — console styles
-   Palette: Lloyds deep green ink, quiet institutional neutrals.
+   Palette: deep green ink, quiet institutional neutrals.
    Type: system stack on purpose — the demo must work with zero network. */
 :root {
   --ink: #0d211a;
-  --deep: #024731;          /* Lloyds deep green */
-  --green: #006a4d;         /* Lloyds green — primary action */
+  --deep: #024731;          /* deep green */
+  --green: #006a4d;         /* green — primary action */
   --green-soft: #e3efe9;
   --paper: #f2f4f3;
   --card: #ffffff;

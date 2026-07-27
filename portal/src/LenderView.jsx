@@ -173,7 +173,7 @@ export default function LenderView({ me }) {
               let fundClass = 'btn primary', fundLabel = 'Fund invoice', fundDisabled = fundingId !== null;
               if (inv.status === 'REGISTERED') { fundClass = 'btn'; fundLabel = 'Awaiting payer approval'; fundDisabled = true; }
               else if (inv.status === 'FINANCED') {
-                if (mine) { fundClass = 'btn'; fundLabel = 'Financed by you'; fundDisabled = true; }
+                if (mine) { fundClass = 'btn'; fundLabel = 'Financed by me'; fundDisabled = true; }
                 else { fundClass = 'btn amber'; fundLabel = 'Attempt funding'; }
               }
               else if (inv.status === 'SETTLED') { fundClass = 'btn'; fundLabel = 'Settled'; fundDisabled = true; }
