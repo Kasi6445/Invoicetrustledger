@@ -193,8 +193,24 @@ export default function LenderView({ me }) {
                 </td>
                 <td>
                   <span className={`badge ${inv.status}`}>{inv.status}</span>
-                  {inv.status === 'FINANCED' &&
+                  {inv.status === 'FINANCED' && mine &&
                     <div className="sub" style={{ marginTop: 4 }}>Prior assignment recorded on ledger</div>}
+                  {/* Advisory only — it never names the funder and never removes the Fund
+                      control above. The hard stop stays where it belongs: the ledger. */}
+                  {inv.status === 'FINANCED' && !mine && (
+                    <div style={{ marginTop: 6, padding: '6px 8px', borderRadius: 6,
+                                  background: 'var(--amber-bg)', color: 'var(--amber)', fontSize: 12 }}>
+                      <b>Already financed by another financial institution</b>
+                      <div style={{ marginTop: 2 }}>
+                        {inv.financedAt ? new Date(inv.financedAt).toLocaleString() : 'timestamp unavailable'}
+                      </div>
+                      <button className="btn" style={{ padding: '3px 8px', fontSize: 11, marginTop: 6 }}
+                              disabled={fundingId !== null}
+                              onClick={async () => { try { setTrail(await getHistory(inv.invoiceId)); } catch {} }}>
+                        Audit trail
+                      </button>
+                    </div>
+                  )}
                 </td>
                 <td>
                   {inv.risk && (

@@ -285,14 +285,15 @@ test.describe('Invoice Trust Ledger — API business rules', () => {
     }
   });
 
-  test('RBAC MASKING — payer: last-4 bank only, no risk/requestedAmount', async ({ request }) => {
+  test('RBAC MASKING — payer: last-4 bank only, no risk, requestedAmount visible', async ({ request }) => {
     const r = await request.get(`/invoices/${invoiceId}`, { headers: auth(t.payer) });
     const inv = await r.json();
     expect(inv.supplierProfile.bankAccount).toBe('••••5678');
     expect(inv.supplierProfile.sortCode, 'sort code masked for payer').toMatch(/•/);
     expect(inv.supplierProfile.ifsc, 'ifsc replaced by sortCode').toBeUndefined();
     expect(inv.risk).toBeUndefined();          // lender underwriting data — hidden from payer
-    expect(inv.requestedAmount, 'financing economics hidden from payer').toBeUndefined();
+    // CR02: the payer DOES see the advance sought against an invoice they must confirm.
+    expect(Number(inv.requestedAmount), 'requested advance visible to payer').toBeGreaterThan(0);
     expect(inv.payerProfile, 'payer is not shown their own profile back').toBeNull();
     expect(JSON.stringify(inv)).not.toContain('12345678');
   });

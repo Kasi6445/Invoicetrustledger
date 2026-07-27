@@ -138,6 +138,31 @@ app.post('/invoices', auth('supplier'), registerUpload, validateRegister, async 
     } catch (e) { next(new ApiError(409, 'LEDGER_REJECTED', e.message)); }
 });
 
+/* ---- STEP 1b: supplier applies the invoice to a specific lender ----
+   Application is an APP-LAYER fact, not a ledger fact: one invoice stays one ledger
+   record (that is what lets FundInvoice catch the second funder), and the supplier
+   merely offers it to one or more lenders. Deliberately NO ledger call and NO
+   "financed elsewhere" check — a supplier may apply to a second lender even after
+   the first has funded; the ledger is what rejects the second funding, not this. */
+app.post('/invoices/:id/apply', auth('supplier'), async (req, res, next) => {
+    try {
+        const lender = String((req.body && req.body.lender) || '').trim();
+        if (!lender) return next(new ApiError(400, 'VALIDATION_ERROR', 'A lender is required.'));
+
+        const db = offchain.load();
+        const list = db.applications[req.params.id] || [];
+        // The ONE dedup rule at this stage: the same lender twice, for the same invoice.
+        if (list.some(a => a.lender === lender))
+            return next(new ApiError(409, 'ALREADY_APPLIED',
+                'This invoice has already been submitted to that lender.'));
+
+        list.push({ lender, status: 'PENDING', appliedAt: new Date().toISOString() });
+        db.applications[req.params.id] = list;
+        offchain.save(db);
+        res.json(list);
+    } catch (e) { next(e); }
+});
+
 /* ---- STEP 2: payer approves / disputes ---- */
 app.post('/invoices/:id/approve', auth('payer'), async (req, res, next) => {
     try {
@@ -148,7 +173,10 @@ app.post('/invoices/:id/approve', auth('payer'), async (req, res, next) => {
 
 app.post('/invoices/:id/dispute', auth('payer'), async (req, res, next) => {
     try {
-        const reason = (req.body && req.body.reason) || 'Disputed by payer';
+        // A rejection must always carry a reason — the supplier has to know what to fix,
+        // and the reason is what gets written to the ledger's disputeReason field.
+        const reason = String((req.body && req.body.reason) || '').trim();
+        if (!reason) return next(new ApiError(400, 'VALIDATION_ERROR', 'A rejection reason is required.'));
         const ledger = await getLedger();
         res.json(JSON.parse(await ledger.submit('DisputeInvoice', req.params.id, req.user.displayName, reason)));
     } catch (e) { next(new ApiError(409, 'LEDGER_REJECTED', e.message)); }
@@ -199,8 +227,20 @@ app.get('/invoices', auth(), async (req, res, next) => {
         const ledger = await getLedger();
         const all = JSON.parse(await ledger.evaluate('GetAllInvoices'));
         const db = offchain.load();
-        res.json(all.map(inv =>
-            maskForRole(riskScore(withGoods(inv, db), all, db.payerProfiles[inv.payerName]), db.supplierProfiles[inv.supplierCRN], db.payerProfiles[inv.payerName], req.user.role, req.user.displayName)));
+        // Lender-directed visibility: a lender's queue holds only what was applied to
+        // them, plus anything they financed themselves. A filter on the returned list —
+        // the ledger still holds and returns every invoice. Supplier/payer are unchanged.
+        const appliedTo = (inv, name) =>
+            (db.applications[inv.invoiceId] || []).some(a => a.lender === name);
+        const rows = req.user.role === 'lender'
+            ? all.filter(inv => appliedTo(inv, req.user.displayName) || inv.financedBy === req.user.displayName)
+            : all;
+        res.json(rows.map(inv => {
+            const out = maskForRole(riskScore(withGoods(inv, db), all, db.payerProfiles[inv.payerName]), db.supplierProfiles[inv.supplierCRN], db.payerProfiles[inv.payerName], req.user.role, req.user.displayName);
+            // The supplier sees where they have applied; nobody else needs the list.
+            if (req.user.role === 'supplier') out.applications = db.applications[inv.invoiceId] || [];
+            return out;
+        }));
     } catch (e) { next(e); }
 });
 

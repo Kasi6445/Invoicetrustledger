@@ -1,6 +1,17 @@
 import { useEffect, useState } from 'react';
-import { listInvoices, registerInvoice, aiExtract, getHistory } from './api';
+import { listInvoices, registerInvoice, aiExtract, getHistory, applyToLender } from './api';
 import AuditTrail from './AuditTrail';
+
+// The funders this supplier can offer an invoice to. `name` is byte-identical to the
+// displayName in users.js so an application compares directly against the ledger's
+// financedBy; `short` is display only — the full name rides along as the tooltip.
+// A dropdown, not one control per bank: this list is expected to grow to many funders,
+// so the register form scales by selection, never by adding UI per lender.
+const LENDERS = [
+  { name: 'Lloyds Bank Commercial Banking', short: 'Lloyds' },
+  { name: 'Meridian Invoice Finance Ltd',   short: 'Meridian' },
+];
+const shortName = name => (LENDERS.find(l => l.name === name) || {}).short || name;
 
 const EMPTY = {
   invoiceNumber: '', payerName: 'Northfield Retail Group plc', amount: '', requestedAmount: '',
@@ -21,6 +32,7 @@ export default function SupplierView({ me }) {
   const [invoices, setInvoices] = useState([]);
   const [trail, setTrail] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [lenders, setLenders] = useState([]);   // funders chosen on the register form
 
   const refresh = () => listInvoices().then(setInvoices).catch(() => {});
   useEffect(() => { refresh(); }, []);
@@ -62,14 +74,28 @@ export default function SupplierView({ me }) {
     } finally { setAiBusy(false); }
   }
 
+  // Register, then submit the invoice to each funder chosen on the form. The
+  // applications are a separate app-layer step (no ledger write) — so a failure to
+  // reach one funder never unwinds a registration that the ledger has already accepted.
   async function register() {
     if (requestedTooHigh) return;   // inline message already shown; ledger would reject anyway
     setResult(null);
     setBusy(true);
     try {
       const inv = await registerInvoice(fields, files);
-      setResult({ ok: true, message: `Registered as ${inv.invoiceId} — status ${inv.status}. Document hash anchored on-chain.` });
-      setFields(EMPTY); setFiles(NO_FILES);
+      let note = '';
+      if (lenders.length) {
+        const failed = [];
+        for (const l of lenders) {
+          try { await applyToLender(inv.invoiceId, l); }
+          catch (e) { failed.push(`${shortName(l)} (${e.response?.data?.error || e.message})`); }
+        }
+        const sent = lenders.filter(l => !failed.some(f => f.startsWith(shortName(l))));
+        if (sent.length) note += ` Submitted to ${sent.map(shortName).join(' and ')}.`;
+        if (failed.length) note += ` Could not submit to ${failed.join('; ')}.`;
+      }
+      setResult({ ok: true, message: `Registered as ${inv.invoiceId} — status ${inv.status}. Document hash anchored on-chain.${note}` });
+      setFields(EMPTY); setFiles(NO_FILES); setLenders([]);
       refresh();
     } catch (e) {
       setResult({ ok: false, message: e.response?.data?.error || e.message });
@@ -123,6 +149,35 @@ export default function SupplierView({ me }) {
           <input type="text" value={fields.goodsDescription} placeholder="e.g. 200 bales cotton yarn, 40s count"
                  onChange={e => set('goodsDescription', e.target.value)} /></label>
 
+        {/* Pick the funders here, at registration. The dropdown only ever lists what is
+            not already chosen, so it scales to any number of banks; the picks below are
+            an app-layer application each — the ledger sees one invoice, once. */}
+        <label className="f" style={{ marginTop: 12 }}>
+          <span>Submit financing request to</span>
+          <select value="" disabled={busy || lenders.length === LENDERS.length}
+                  onChange={e => { if (e.target.value) setLenders(ls => [...ls, e.target.value]); }}>
+            <option value="">
+              {lenders.length === LENDERS.length ? 'All funders selected' : 'Choose a funder…'}
+            </option>
+            {LENDERS.filter(l => !lenders.includes(l.name))
+                    .map(l => <option key={l.name} value={l.name}>{l.name}</option>)}
+          </select>
+        </label>
+        <div className="chiprow" style={{ marginTop: 8 }}>
+          {lenders.length === 0
+            ? <span className="sub" style={{ fontSize: 12, color: 'var(--muted)' }}>
+                No funder selected — the invoice registers on the ledger but reaches no lender's queue.
+              </span>
+            : lenders.map(l => (
+                <span key={l} className="applied" title={l}>
+                  {shortName(l)}
+                  <button type="button" className="chip-x" disabled={busy}
+                          title={`Remove ${shortName(l)}`}
+                          onClick={() => setLenders(ls => ls.filter(x => x !== l))}>×</button>
+                </span>
+              ))}
+        </div>
+
         <div className="formgrid" style={{ marginTop: 12 }}>
           <label className="f"><span>Invoice copy {files.invoiceCopy
               ? '✓' : <span style={{ color: 'var(--red)' }}>* required — drives OCR</span>}</span>
@@ -152,15 +207,35 @@ export default function SupplierView({ me }) {
       <p className="eyebrow">My invoices — {me.displayName}</p>
       <div className="card">
         <table>
-          <thead><tr><th>Invoice</th><th>Amount</th><th>Requested</th><th>Status</th><th>Registered</th><th></th></tr></thead>
+          <thead><tr><th>Invoice</th><th>Amount</th><th>Requested</th><th>Status</th><th>Submitted to</th><th>Registered</th><th></th></tr></thead>
           <tbody>
-            {mine.length === 0 && <tr><td colSpan="6" className="sub">No invoices yet — register the first one above.</td></tr>}
+            {mine.length === 0 && <tr><td colSpan="7" className="sub">No invoices yet — register the first one above.</td></tr>}
             {mine.map(inv => (
               <tr key={inv.invoiceId}>
                 <td>{inv.invoiceNumber}<div className="sub">{inv.invoiceId}</div></td>
                 <td className="amount">{gbp(inv.amount, inv.currency)}</td>
                 <td className="amount">{inv.requestedAmount != null ? gbp(inv.requestedAmount, inv.currency) : '—'}</td>
-                <td><span className={`badge ${inv.status}`}>{inv.status}</span></td>
+                <td><span className={`badge ${inv.status}`}>{inv.status}</span>
+                  {inv.status === 'DISPUTED' && (
+                    <div className="sub" style={{ marginTop: 4, color: 'var(--red)' }}>
+                      Payer's reason: {inv.disputeReason || 'none recorded'}
+                    </div>)}
+                </td>
+                {/* Read-only: funders are chosen on the register form, so this column
+                    lists only what this invoice was actually submitted to — it never
+                    grows a control per bank. */}
+                <td style={{ minWidth: 150 }}>
+                  {(inv.applications || []).length === 0
+                    ? <span className="sub">—</span>
+                    : <div className="chiprow">
+                        {inv.applications.map(a => (
+                          <span key={a.lender} className="applied"
+                                title={`${a.lender} — submitted ${new Date(a.appliedAt).toLocaleString()}`}>
+                            ✓ {shortName(a.lender)} <span className="state">{a.status}</span>
+                          </span>
+                        ))}
+                      </div>}
+                </td>
                 <td className="sub">{new Date(inv.registeredAt).toLocaleString()}</td>
                 <td><button className="btn" disabled={busy}
                             onClick={async () => { try { setTrail(await getHistory(inv.invoiceId)); } catch {} }}>Audit trail</button></td>
@@ -168,6 +243,11 @@ export default function SupplierView({ me }) {
             ))}
           </tbody>
         </table>
+        <p className="sub" style={{ marginBottom: 0 }}>
+          Funders are chosen when the invoice is registered. Submitting to a lender is an
+          application-layer action — no ledger write — and the same lender cannot be
+          submitted to twice for one invoice.
+        </p>
       </div>
 
       {trail && <AuditTrail trail={trail} onClose={() => setTrail(null)} />}

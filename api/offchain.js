@@ -35,12 +35,19 @@ function load() {
                     settlementAccount: '30-96-27 / 87654321'
                 }
             },
-            docs: {}   // invoiceId -> { invoiceCopy: {fileName, sha256}, purchaseOrder: {...}, goodsReceived: {...} }
+            docs: {},  // invoiceId -> { invoiceCopy: {fileName, sha256}, purchaseOrder: {...}, goodsReceived: {...} }
+            // Financing applications (app layer, NOT a ledger fact): which lenders the
+            // supplier has offered this invoice to. invoiceId -> [ { lender, status, appliedAt } ].
+            // `lender` is the lender's displayName so it compares directly with financedBy.
+            applications: {}
         };
         fs.mkdirSync(path.dirname(FILE), { recursive: true });
         fs.writeFileSync(FILE, JSON.stringify(seed, null, 2));
     }
-    return JSON.parse(fs.readFileSync(FILE, 'utf8'));
+    const db = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+    // Backward compat: stores written before applications existed must still load.
+    if (!db.applications) db.applications = {};
+    return db;
 }
 
 function save(db) { fs.writeFileSync(FILE, JSON.stringify(db, null, 2)); }

@@ -100,9 +100,11 @@ R=$(curl -s $API/invoices/$ID/history -H "Authorization: Bearer $LT")
 echo "$R" | grep -q 'REGISTERED' && echo "$R" | grep -q 'FINANCED' && echo "$R" | grep -q "Lloyds Bank" \
   && ok "history as lloyds: full lifecycle with own name" || bad "lloyds history" "$R"
 
+# CR02: the payer DOES see requestedAmount now (the advance sought against an invoice they
+# are asked to confirm); lender risk data is still restricted.
 R=$(curl -s $API/invoices/$ID -H "Authorization: Bearer $PT")
-echo "$R" | grep -q '••••5678' && echo "$R" | grep -qv '"risk"' && echo "$R" | grep -qv '"requestedAmount"' \
-  && ok "payer view: bank last-4, no risk, no requestedAmount" || bad "payer masking" "$R"
+echo "$R" | grep -q '••••5678' && echo "$R" | grep -qv '"risk"' && echo "$R" | grep -q '"requestedAmount"' \
+  && ok "payer view: bank last-4, no risk, requestedAmount visible" || bad "payer masking" "$R"
 
 # non-funding lender (Meridian) sees the supplier's bank MASKED
 R=$(curl -s $API/invoices/$ID -H "Authorization: Bearer $OT")

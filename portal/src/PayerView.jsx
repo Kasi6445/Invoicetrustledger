@@ -35,6 +35,19 @@ export default function PayerView({ me }) {
     } finally { setBusy(false); }
   }
 
+  // A rejection must carry a reason — the supplier has to know what to fix. This is the
+  // client-side fast-fail (empty default, cancel aborts); the API is the real guard and
+  // returns 400 "A rejection reason is required." if an empty one ever gets through.
+  function rejectWithReason(id) {
+    const reason = window.prompt('Reason for rejecting this invoice (required):', '');
+    if (reason === null) return;                       // cancelled
+    if (!reason.trim()) {
+      setMsg({ ok: false, text: 'A rejection reason is required.' });
+      return;
+    }
+    act(i => disputeInvoice(i, reason.trim()), id);
+  }
+
   async function openDoc(id, type) {
     try {
       const url = await getDoc(id, type);
@@ -79,20 +92,21 @@ export default function PayerView({ me }) {
       <p className="eyebrow">Step 2 · Awaiting your confirmation</p>
       <div className="card">
         <table>
-          <thead><tr><th>Invoice</th><th>Supplier</th><th>Amount</th><th>Goods &amp; documents</th><th>Due</th><th></th></tr></thead>
+          <thead><tr><th>Invoice</th><th>Supplier</th><th>Amount</th><th>Requested</th><th>Goods &amp; documents</th><th>Due</th><th></th></tr></thead>
           <tbody>
-            {pending.length === 0 && <tr><td colSpan="6" className="sub">Nothing waiting for approval.</td></tr>}
+            {pending.length === 0 && <tr><td colSpan="7" className="sub">Nothing waiting for approval.</td></tr>}
             {pending.map(inv => (
               <tr key={inv.invoiceId}>
                 <td>{inv.invoiceNumber}<div className="sub">{inv.invoiceId}</div></td>
                 <td>{inv.supplierName}
                   <div className="sub">a/c {inv.supplierProfile?.bankAccount || '—'} · sort {inv.supplierProfile?.sortCode || '—'}</div></td>
                 <td className="amount">{gbp(inv.amount, inv.currency)}</td>
+                <td className="amount">{inv.requestedAmount != null ? gbp(inv.requestedAmount, inv.currency) : '—'}</td>
                 <td style={{ maxWidth: 260 }}><GoodsAndDocs inv={inv} /></td>
                 <td className="sub">{inv.dueDate}</td>
                 <td style={{ whiteSpace: 'nowrap' }}>
                   <button className="btn primary" disabled={busy} onClick={() => act(approveInvoice, inv.invoiceId)}>{busy ? 'Working…' : 'Approve'}</button>{' '}
-                  <button className="btn danger" disabled={busy} onClick={() => act(id => disputeInvoice(id, 'Goods not received as described'), inv.invoiceId)}>Dispute</button>{' '}
+                  <button className="btn danger" disabled={busy} onClick={() => rejectWithReason(inv.invoiceId)}>Dispute</button>{' '}
                   <button className="btn" disabled={busy} onClick={async () => { try { setTrail(await getHistory(inv.invoiceId)); } catch {} }}>Audit trail</button>
                 </td>
               </tr>

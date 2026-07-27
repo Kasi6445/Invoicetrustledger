@@ -62,6 +62,8 @@ export const getHistory     = id => client.get(`/invoices/${id}/history`).then(r
 export const approveInvoice = id => client.post(`/invoices/${id}/approve`, {}).then(r => r.data);
 export const disputeInvoice = (id, reason) => client.post(`/invoices/${id}/dispute`, { reason }).then(r => r.data);
 export const fundInvoice    = id => client.post(`/invoices/${id}/fund`, {}).then(r => r.data);
+// App-layer only: offer this invoice to a named lender. Returns the updated list.
+export const applyToLender  = (id, lender) => client.post(`/invoices/${id}/apply`, { lender }).then(r => r.data);
 export const declineInvoice = (id, reason) => client.post(`/invoices/${id}/decline`, { reason }).then(r => r.data);
 export const verifyLedger   = () => client.get('/ledger/verify').then(r => r.data);
 export const getPaymentInstructions = id => client.get(`/invoices/${id}/payment-instructions`).then(r => r.data);

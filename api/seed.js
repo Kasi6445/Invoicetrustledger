@@ -42,6 +42,12 @@ async function register(fieldsObj, doc, token) {
     const d = await r.json(); if (!r.ok) console.log('  note:', d.error); return d;
 }
 
+// Lender-directed visibility: a lender's queue only holds invoices applied to them, so the
+// seed must apply as well as register or both consoles come up empty. displayNames from users.js.
+const LLOYDS = 'Lloyds Bank Commercial Banking';
+const MERIDIAN = 'Meridian Invoice Finance Ltd';
+const apply = (id, lender, token) => post(`/invoices/${id}/apply`, { lender }, token);
+
 const realDoc = () => ({ buffer: fs.readFileSync(CLEAN_014), fileName: 'invoice-clean-INV-2026-014.pdf' });
 const synthDoc = number => ({ buffer: Buffer.from(`seed-doc-${number}`), fileName: `${number}.pdf` });
 
@@ -53,12 +59,14 @@ const synthDoc = number => ({ buffer: Buffer.from(`seed-doc-${number}`), fileNam
     const a = await register({ invoiceNumber: 'INV-2026-001', payerName: 'Northfield Retail Group plc',
         amount: 250000, requestedAmount: 225000, currency: 'GBP',
         invoiceDate: '2026-07-05', dueDate: '2026-08-15' }, realDoc(), s);
-    await post(`/invoices/${a.invoiceId}/approve`, {}, p);
+    await apply(a.invoiceId, LLOYDS, s); await apply(a.invoiceId, MERIDIAN, s);  // both — the kill shot needs
+    await post(`/invoices/${a.invoiceId}/approve`, {}, p);                       // Meridian to SEE this row
     await post(`/invoices/${a.invoiceId}/fund`, {}, l);                 // one already-financed example
 
     const b = await register({ invoiceNumber: 'INV-2026-002', payerName: 'Northfield Retail Group plc',
         amount: 400000, requestedAmount: 360000, currency: 'GBP',
         invoiceDate: '2026-07-20', dueDate: '2026-09-01' }, synthDoc('INV-2026-002'), s);
+    await apply(b.invoiceId, LLOYDS, s); await apply(b.invoiceId, MERIDIAN, s);
     await post(`/invoices/${b.invoiceId}/approve`, {}, p);              // one ready-to-fund example
 
     const c = await register({ invoiceNumber: 'INV-2026-003', payerName: 'Northfield Retail Group plc',
@@ -67,7 +75,8 @@ const synthDoc = number => ({ buffer: Buffer.from(`seed-doc-${number}`), fileNam
     const d = await register({ invoiceNumber: 'INV-2026-004', payerName: 'Northfield Retail Group plc',
         amount: 620000, requestedAmount: 550000, currency: 'GBP',
         invoiceDate: '2026-08-10', dueDate: '2026-10-05' }, synthDoc('INV-2026-004'), s);
-    await post(`/invoices/${d.invoiceId}/approve`, {}, p);              // search-demo: ready to fund
+    await apply(d.invoiceId, LLOYDS, s);                                // Lloyds only — proves the
+    await post(`/invoices/${d.invoiceId}/approve`, {}, p);              // lender queue really is filtered
 
     console.log('Seeded:', a.invoiceId, b.invoiceId, c.invoiceId, d.invoiceId);
 })();
