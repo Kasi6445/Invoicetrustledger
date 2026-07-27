@@ -1,23 +1,33 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { login } from './api';
 
+// Category cards only — no company or institution names before sign-in. The
+// sign-in page is pre-authentication, so it must not disclose who is on the
+// ledger; there is ONE lender card because both lenders share the same role
+// (naming them here would leak the competing institution).
 const ROLES = [
-  { username: 'supplier1', role: 'Supplier', name: 'Pennine Textiles Ltd',            desc: 'Registers invoices on the ledger' },
-  { username: 'payer1',    role: 'Payer',    name: 'Northfield Retail Group plc',     desc: 'Confirms invoices are genuine' },
-  { username: 'lloyds',    role: 'Lender',   name: 'Lloyds Bank Commercial Banking',  desc: 'Verifies risk and finances invoices' },
-  { username: 'meridian',  role: 'Lender',   name: 'Meridian Invoice Finance Ltd',    desc: 'A second lender — tries the same invoice' },
+  { key: 'supplier', role: 'Supplier', username: 'supplier1', desc: 'Registers invoices on the ledger' },
+  { key: 'payer',    role: 'Payer',    username: 'payer1',    desc: 'Confirms invoices are genuine' },
+  { key: 'lender',   role: 'Lender',   username: '',          desc: 'Verifies risk and finances invoices' },
 ];
 
 export default function Login({ onLogin }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [picked, setPicked] = useState(null);
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
+  const userRef = useRef(null);
 
-  // Quick-select: pre-fill the username only. No authentication until submit.
-  function pick(u) {
-    setUsername(u);
+  // Quick-select: pre-fill the form only. No authentication until submit.
+  // The lender card deliberately leaves the username blank — which lender is
+  // signing in is theirs to type, not ours to suggest.
+  function pick(r) {
+    setUsername(r.username);
+    setPassword('demo123');
+    setPicked(r.key);
     setErr(null);
+    if (!r.username) userRef.current?.focus();
   }
 
   async function submit(e) {
@@ -39,11 +49,10 @@ export default function Login({ onLogin }) {
 
       <div className="login-grid">
         {ROLES.map(r => (
-          <button key={r.username} type="button"
-                  className={`login-card${username === r.username ? ' selected' : ''}`}
-                  onClick={() => pick(r.username)}>
-            <div className="r">{r.role}</div>
-            <div className="n">{r.name}</div>
+          <button key={r.key} type="button"
+                  className={`login-card${picked === r.key ? ' selected' : ''}`}
+                  onClick={() => pick(r)}>
+            <div className="n">{r.role}</div>
             <div className="d">{r.desc}</div>
           </button>
         ))}
@@ -52,7 +61,7 @@ export default function Login({ onLogin }) {
       <form className="card" onSubmit={submit} style={{ marginTop: 16, maxWidth: 420 }}>
         <div className="formgrid">
           <label className="f"><span>Username</span>
-            <input type="text" value={username} autoComplete="username"
+            <input type="text" value={username} autoComplete="username" ref={userRef}
                    onChange={e => setUsername(e.target.value)} /></label>
           <label className="f"><span>Password</span>
             <input type="password" value={password} autoComplete="current-password"
