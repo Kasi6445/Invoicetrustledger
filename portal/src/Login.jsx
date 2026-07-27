@@ -18,16 +18,19 @@ export default function Login({ onLogin }) {
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
   const userRef = useRef(null);
+  const passRef = useRef(null);
 
-  // Quick-select: pre-fill the form only. No authentication until submit.
-  // The lender card deliberately leaves the username blank — which lender is
-  // signing in is theirs to type, not ours to suggest.
+  // Quick-select: pre-fill the USERNAME only. The password is never suggested —
+  // it stays an empty field the user has to type, so the card is a shortcut to
+  // the form, not a way past it. No authentication until submit.
+  // The lender card also leaves the username blank — which lender is signing in
+  // is theirs to type, not ours to suggest — so focus stays there instead.
   function pick(r) {
     setUsername(r.username);
-    setPassword('demo123');
+    setPassword('');
     setPicked(r.key);
     setErr(null);
-    if (!r.username) userRef.current?.focus();
+    (r.username ? passRef : userRef).current?.focus();
   }
 
   async function submit(e) {
@@ -64,7 +67,7 @@ export default function Login({ onLogin }) {
             <input type="text" value={username} autoComplete="username" ref={userRef}
                    onChange={e => setUsername(e.target.value)} /></label>
           <label className="f"><span>Password</span>
-            <input type="password" value={password} autoComplete="current-password"
+            <input type="password" value={password} autoComplete="current-password" ref={passRef}
                    onChange={e => setPassword(e.target.value)} /></label>
         </div>
         {err && <div className="rejected" style={{ marginTop: 10 }}><div className="ledger-says">{err}</div></div>}
