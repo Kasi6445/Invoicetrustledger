@@ -58,7 +58,7 @@ _Last updated: 2026-07-23._
 1. **Copy the `.webm` demo videos to durable off-laptop storage.** Canonical copies are
    `e2e/evidence/full-lifecycle.webm` and `e2e/evidence/otherbank-kill-shot.webm`; both were
    copied to `~/demo-backup/` (and older copies exist under `~/itl-demo-backup/` and
-   `/mnt/c/Users/sandh/itl-demo-backup/`). A real cloud/USB copy the judges could reach if the
+   `/mnt/c/Users/<username>/itl-demo-backup/`). A real cloud/USB copy the judges could reach if the
    laptop dies is still worth doing.
 
 _Resolved this session: `api/restart.sh` exercised end-to-end (came up `LEDGER_MODE = fabric`);
