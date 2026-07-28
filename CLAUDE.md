@@ -39,7 +39,10 @@ cp .env.example .env && npm install   # then set a real JWT_SECRET in .env (see 
 node server.js                 # start on :3000, leave running
 bash test-flow.sh               # conformance suite — must print "26 passed, 0 failed"
 bash regression.sh              # test-flow PLUS hardening checks (401/400/403, upload limits)
-node seed.js                    # demo data: one FINANCED invoice, one APPROVED-and-ready invoice
+node seed.js                    # demo data: one FINANCED invoice, one APPROVED-and-ready invoice.
+                                # Also APPLIES them to lenders (CR02) — without that both lender
+                                # consoles come up empty: 001+002 -> both lenders, 004 -> Lloyds
+                                # only, 003 -> nobody (which is what proves the queue filter)
 rm -rf data                     # reset mock-mode ledger state (stop server first)
 
 # Portal (from portal/)
@@ -236,11 +239,19 @@ demo path ("Plan B") if the Fabric network can't be stood up.
   'cached'`). It NEVER throws. Exposed at `GET /invoices/:id/supplier-check` (lender + supplier own)
   and surfaced as the lender's **Companies House** button.
 - `api/users.js` — hardcoded demo accounts (all password `demo123`): `supplier1`, `payer1`,
-  `lloyds` and `otherbank` (two lenders on purpose — `otherbank` is the second-financing kill
-  shot). Auth is plain JWT, explicitly not OIDC, for demo purposes.
+  `payer2`, `lloyds` and `meridian` (two lenders on purpose — `meridian`, displayName
+  `Meridian Invoice Finance Ltd`, is the second-financing kill shot). There is no `otherbank`
+  account; that username 401s. Auth is plain JWT, explicitly not OIDC, for demo purposes.
 - Frontend (`portal/src/`) is one view per role (`SupplierView.jsx`, `PayerView.jsx`,
   `LenderView.jsx`) plus `AuditTrail.jsx`, `Login.jsx` and `ErrorBoundary.jsx`, composed in
   `App.jsx` by `me.role`. `portal/src/api.js` is the only place that talks to the API (base URL
   hardcoded to `http://localhost:3000`); it keeps the JWT in `sessionStorage` (survives refresh
   via `restoreSession()`) and an axios interceptor clears the session and returns to login on any
-  401. Login: role cards only pre-fill the username — authentication happens on form submit.
+  401. Login (`Login.jsx`): exactly THREE generic role cards — Supplier / Payer / Lender, with no
+  company or institution names, because the sign-in page is pre-authentication. A card click
+  pre-fills the USERNAME only (`supplier1` / `payer1`; the Lender card pre-fills nothing and
+  focuses the username box, since both lenders share it — type `lloyds` or `meridian`). The
+  password is always typed by hand and nothing authenticates until form submit.
+  `SupplierView.jsx` also carries the CR02 funder picker — a **"Submit financing request to"**
+  selector on the register form, plus a **Submitted to** column. It defaults to NO funder
+  selected, and an invoice applied to nobody reaches no lender queue at all.
