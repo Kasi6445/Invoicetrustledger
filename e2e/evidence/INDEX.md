@@ -29,7 +29,7 @@ CR01 UI.
   SHA-256 of the invoice copy; `requestedAmount` persisted.
 - `03-payer-approved.png` — payer console Approve → APPROVED (API-verified).
 - `04-lloyds-financed.png` — Lloyds funded → FINANCED; the invoice moves to the
-  **Funded by me** tab with a disabled `Financed by you` button.
+  **Funded by me** tab with a disabled `Financed by me` button.
 - `05-lloyds-payment-instructions.png` — **CR01 entitlement unlock**: the funder
   (Lloyds) opens the Payment instructions modal and sees the supplier's FULL
   bank account + sort code. No other lender can.

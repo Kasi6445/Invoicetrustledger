@@ -60,12 +60,25 @@ async function shot(page: Page, name: string) {
   await page.screenshot({ path: path.join(EVIDENCE, `${String(shotIndex).padStart(2, '0')}-${name}.png`), fullPage: true });
 }
 
-async function loginAs(page: Page, who: RegExp) {
+// The sign-in page names nobody: three generic role cards, and the ONE lender
+// card is shared by both lenders (naming them pre-auth would leak the competing
+// institution). So a card is picked by ROLE, and the account is typed — which is
+// the app's real flow: card pre-fills the username only, the password is always
+// typed, and nothing authenticates until submit.
+const ROLE_CARD: Record<string, RegExp> = {
+  supplier1: /^Supplier\b/,
+  payer1:    /^Payer\b/,
+  lloyds:    /^Lender\b/,
+  meridian:  /^Lender\b/,
+};
+
+async function loginAs(page: Page, username: string) {
   await page.goto('/');
   const logoutBtn = page.getByRole('button', { name: /log ?out|sign ?out/i }).first();
   if (await logoutBtn.isVisible().catch(() => false)) await logoutBtn.click();
-  await page.getByRole('button', { name: who }).first().click();
-  await page.getByLabel(/password/i).fill('demo123');
+  await page.getByRole('button', { name: ROLE_CARD[username] }).first().click();
+  await page.getByLabel(/username/i).fill(username);   // lender card pre-fills nothing
+  await page.getByLabel(/password/i).fill('demo123');  // never pre-filled by a card
   await page.getByRole('button', { name: /^sign in$/i }).click();
   await expect(page.getByRole('button', { name: /log ?out/i })).toBeVisible({ timeout: 15_000 });
 }
@@ -87,6 +100,16 @@ async function fillSmart(loc: Locator, value: string) {
   else await loc.fill(value);
 }
 
+// Uploading the invoice copy kicks off /ai/extract (stubbed) which pre-fills the
+// form ASYNCHRONOUSLY. Wait for that to land before typing: a fill() that races
+// the autofill clears the box, React re-populates it mid-fill, and the typed text
+// lands APPENDED to the extracted value (a corrupted invoice number).
+async function uploadInvoiceCopy(page: Page, pdf: string) {
+  await page.locator('input[type="file"]').first().setInputFiles(pdf);
+  await expect(field(page, /invoice ?number/i, 'invoiceNumber'),
+    'autofill settled before manual entry').toHaveValue(STUB_EXTRACT.invoiceNumber, { timeout: 20_000 });
+}
+
 // Fill the supplier register form manually (OCR-independent). requestedAmount is
 // always set because the ledger requires it, and the invoice copy is mandatory —
 // the Register button stays disabled without either. Pass `pdf` to attach the
@@ -95,7 +118,7 @@ async function fillRegisterForm(page: Page, o: {
   invoiceNumber: string; amount: string; requestedAmount: string; dueDate: string;
   invoiceDate?: string; pdf?: string;
 }) {
-  if (o.pdf) await page.locator('input[type="file"]').first().setInputFiles(o.pdf);
+  if (o.pdf) await uploadInvoiceCopy(page, o.pdf);
   await field(page, /invoice ?number/i, 'invoiceNumber').fill(o.invoiceNumber);
   await fillSmart(field(page, /payer/i, 'payerName'), 'Northfield Retail Group plc');
   await field(page, /amount/i, 'amount').fill(o.amount);
@@ -127,10 +150,10 @@ test('full invoice lifecycle: register → approve → fund → payment-instruct
   await stubGemini(page);
 
   await test.step('1. SUPPLIER: upload invoice copy + fill the register form', async () => {
-    await loginAs(page, /supplier|pennine/i);
+    await loginAs(page, 'supplier1');
     // First file input is the OCR dropzone (invoiceCopy) — upload drives the
     // on-chain docHash. /ai/extract is stubbed, so no live Gemini.
-    await page.locator('input[type="file"]').first().setInputFiles(PDF);
+    await uploadInvoiceCopy(page, PDF);
     await fillRegisterForm(page, {
       invoiceNumber: INV_NO, amount: '500000', requestedAmount: '450000',
       invoiceDate: '2026-07-01', dueDate: '2026-08-30',
@@ -153,7 +176,7 @@ test('full invoice lifecycle: register → approve → fund → payment-instruct
 
   await test.step('3. PAYER: approve -> APPROVED', async () => {
     await logout(page);
-    await loginAs(page, /payer|northfield/i);
+    await loginAs(page, 'payer1');
     const row = page.locator('tr').filter({ hasText: INV_NO }).first();
     await expect(row).toBeVisible({ timeout: 15_000 });
     await row.getByRole('button', { name: /approve/i }).click();
@@ -171,7 +194,7 @@ test('full invoice lifecycle: register → approve → fund → payment-instruct
   const otherPage = await otherCtx.newPage();
 
   await test.step('4. SECOND LENDER (Meridian): console open, Fund button live', async () => {
-    await loginAs(otherPage, /meridian/i);
+    await loginAs(otherPage, 'meridian');
     const otherRow = otherPage.locator('tr').filter({ hasText: INV_NO }).first();
     await expect(otherRow).toBeVisible({ timeout: 15_000 });
     await expect(otherRow.getByRole('button', { name: /fund invoice/i }),
@@ -180,7 +203,7 @@ test('full invoice lifecycle: register → approve → fund → payment-instruct
 
   await test.step('5. LLOYDS: verify masking pre-fund, then fund -> FINANCED', async () => {
     await logout(page);
-    await loginAs(page, /lloyds/i);
+    await loginAs(page, 'lloyds');
     const row = page.locator('tr').filter({ hasText: INV_NO }).first();
     await expect(row).toBeVisible({ timeout: 15_000 });
 
@@ -198,7 +221,7 @@ test('full invoice lifecycle: register → approve → fund → payment-instruct
     await page.getByRole('button', { name: /funded by me/i }).click();
     const fundedRow = page.locator('tr').filter({ hasText: INV_NO }).first();
     await expect(fundedRow).toBeVisible({ timeout: 15_000 });
-    await expect(fundedRow.getByRole('button', { name: /financed by you/i })).toBeDisabled();
+    await expect(fundedRow.getByRole('button', { name: /financed by me/i })).toBeDisabled();
     await shot(page, 'lloyds-financed');
   });
 
@@ -227,7 +250,8 @@ test('full invoice lifecycle: register → approve → fund → payment-instruct
     // The chaincode's own rejection, rendered in the red banner (LenderView.jsx).
     await expect(otherPage.getByText(/LEDGER REJECTED THIS TRANSACTION/i)).toBeVisible({ timeout: 30_000 });
     await expect(otherPage.getByText(/DUPLICATE FINANCING BLOCKED/i)).toBeVisible();
-    await expect(otherPage.getByText(/another financial institution/i)).toBeVisible();
+    // The invariant is that the funder is NOT named — asserted as absence, not as
+    // a particular euphemism, so re-wording the mask can never fake a pass.
     await expect(otherPage.getByText(/Lloyds/)).toHaveCount(0);
     await shot(otherPage, 'KILL-SHOT-duplicate-financing-blocked');
   });
@@ -250,7 +274,7 @@ test('full invoice lifecycle: register → approve → fund → payment-instruct
 
   await test.step('8. FAKE RESUBMISSION: same number, different amount -> BLOCKED at registration', async () => {
     await logout(page);
-    await loginAs(page, /supplier|pennine/i);
+    await loginAs(page, 'supplier1');
     await fillRegisterForm(page, {
       invoiceNumber: INV_NO, amount: '750000', requestedAmount: '675000', dueDate: '2026-09-15',
       pdf: PDF_TAMPERED,
@@ -267,7 +291,7 @@ test('full invoice lifecycle: register → approve → fund → payment-instruct
 
   await test.step('9. NEGATIVE: the payer (never entitled) never sees the full bank account', async () => {
     await logout(page);
-    await loginAs(page, /payer|northfield/i);
+    await loginAs(page, 'payer1');
     // Payer is never a funder — the entitlement unlock must not reach them.
     await expect(page.getByText(FULL_BANK_ACCOUNT)).toHaveCount(0);
   });

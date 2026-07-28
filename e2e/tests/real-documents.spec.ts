@@ -57,12 +57,23 @@ async function shot(page: Page, name: string) {
   await page.screenshot({ path: path.join(EVIDENCE, `R${shotIndex}-${name}.png`), fullPage: true });
 }
 
-async function loginAs(page: Page, who: RegExp) {
+// Sign-in cards are generic role categories (no institution names), and both
+// lenders share the single Lender card — so pick the card by role, then type the
+// account. Mirrors the app: card pre-fills the username only, password typed.
+const ROLE_CARD: Record<string, RegExp> = {
+  supplier1: /^Supplier\b/,
+  payer1:    /^Payer\b/,
+  lloyds:    /^Lender\b/,
+  meridian:  /^Lender\b/,
+};
+
+async function loginAs(page: Page, username: string) {
   await page.goto('/');
   const logoutBtn = page.getByRole('button', { name: /log ?out|sign ?out/i }).first();
   if (await logoutBtn.isVisible().catch(() => false)) await logoutBtn.click();
-  await page.getByRole('button', { name: who }).first().click();
-  await page.getByLabel(/password/i).fill('demo123');
+  await page.getByRole('button', { name: ROLE_CARD[username] }).first().click();
+  await page.getByLabel(/username/i).fill(username);   // lender card pre-fills nothing
+  await page.getByLabel(/password/i).fill('demo123');  // never pre-filled by a card
   await page.getByRole('button', { name: /^sign in$/i }).click();
   await expect(page.getByRole('button', { name: /log ?out/i })).toBeVisible({ timeout: 15_000 });
 }
@@ -89,6 +100,10 @@ async function uploadThenFill(page: Page, pdf: string, o: {
   invoiceNumber: string; amount: string; requestedAmount: string; dueDate: string;
 }) {
   await page.locator('input[type="file"]').first().setInputFiles(pdf);
+  // Wait for the (stubbed) extraction to populate the form before overwriting it —
+  // a fill() racing that re-render ends up APPENDED to the extracted value.
+  await expect(field(page, /invoice ?number/i, 'invoiceNumber'),
+    'autofill settled before manual entry').toHaveValue(STUB_EXTRACT.invoiceNumber, { timeout: 20_000 });
   await field(page, /invoice ?number/i, 'invoiceNumber').fill(o.invoiceNumber);
   await fillSmart(field(page, /payer/i, 'payerName'), 'Northfield Retail Group plc');
   await field(page, /amount/i, 'amount').fill(o.amount);
@@ -151,7 +166,7 @@ test.describe('Real-document scenarios (fixture PDFs, as-is)', () => {
       `${'='.repeat(70)}\n\n` +
       `invoice-clean-INV-2026-014.pdf\n  sha256(file) = ${fileHash}\n`);
 
-    await loginAs(page, /supplier|pennine/i);
+    await loginAs(page, 'supplier1');
     const unique = `INV-014-E2E-${RUN}`;   // unique number so R1 stays repeatable
     await uploadThenFill(page, PDF_014, { invoiceNumber: unique, amount: '325000', requestedAmount: '290000', dueDate: '2026-09-20' });
     await shot(page, 'ocr-second-layout-INV-2026-014');
@@ -168,7 +183,7 @@ test.describe('Real-document scenarios (fixture PDFs, as-is)', () => {
     const fileHash = sha256(PDF_007);
     const preExisting = (await ledgerFindByNumber('INV-2026-007')).length > 0;
 
-    await loginAs(page, /supplier|pennine/i);
+    await loginAs(page, 'supplier1');
     await uploadThenFill(page, PDF_007, { invoiceNumber: 'INV-2026-007', amount: '500000', requestedAmount: '450000', dueDate: '2026-08-30' });
     await page.getByRole('button', { name: /register on ledger/i }).click();
 
@@ -177,7 +192,7 @@ test.describe('Real-document scenarios (fixture PDFs, as-is)', () => {
     } else {
       await expect.poll(async () => (await ledgerFind('INV-2026-007', 500000)).length, { timeout: 30_000 }).toBe(1);
       await page.reload();
-      await loginAs(page, /supplier|pennine/i);
+      await loginAs(page, 'supplier1');
       await uploadThenFill(page, PDF_007, { invoiceNumber: 'INV-2026-007', amount: '500000', requestedAmount: '450000', dueDate: '2026-08-30' });
       await page.getByRole('button', { name: /register on ledger/i }).click();
       await expectDuplicateBlocked(page, dialogs);
@@ -198,7 +213,7 @@ test.describe('Real-document scenarios (fixture PDFs, as-is)', () => {
     const before = await ledgerFindByNumber('INV-2026-007');
     expect(before.length, 'R2 must have left INV-2026-007 on the ledger').toBeGreaterThan(0);
 
-    await loginAs(page, /supplier|pennine/i);
+    await loginAs(page, 'supplier1');
     await uploadThenFill(page, PDF_TAMPERED, { invoiceNumber: 'INV-2026-007', amount: '750000', requestedAmount: '675000', dueDate: '2026-09-15' });
     await shot(page, 'tampered-pdf-ocr-inflated-amount');
     await page.getByRole('button', { name: /register on ledger/i }).click();
@@ -212,7 +227,7 @@ test.describe('Real-document scenarios (fixture PDFs, as-is)', () => {
     expect((await ledgerFindByNumber('INV-2026-007')).length).toBe(before.length);
 
     await logout(page);
-    await loginAs(page, /lloyds/i);
+    await loginAs(page, 'lloyds');
     await page.getByRole('button', { name: /^All \(/ }).click();
     await expect(page.locator('tr').filter({ hasText: 'INV-2026-007' }).first()).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('tr').filter({ hasText: 'INV-2026-007' }).filter({ hasText: /7,?50,?000/ })).toHaveCount(0);
@@ -223,13 +238,13 @@ test.describe('Real-document scenarios (fixture PDFs, as-is)', () => {
     const twinA = `INV-014-TWIN-${RUN}-A`;
     const twinB = `INV-014-TWIN-${RUN}-B`;
 
-    await loginAs(page, /supplier|pennine/i);
+    await loginAs(page, 'supplier1');
     await uploadThenFill(page, PDF_014, { invoiceNumber: twinA, amount: '325000', requestedAmount: '290000', dueDate: '2026-09-20' });
     await page.getByRole('button', { name: /register on ledger/i }).click();
     await expect.poll(async () => (await ledgerFindByNumber(twinA)).length, { timeout: 30_000 }).toBe(1);
 
     await page.reload();
-    await loginAs(page, /supplier|pennine/i);
+    await loginAs(page, 'supplier1');
     await uploadThenFill(page, PDF_014, { invoiceNumber: twinB, amount: '325000', requestedAmount: '290000', dueDate: '2026-09-20' });
     await page.getByRole('button', { name: /register on ledger/i }).click();
     await expect.poll(async () => (await ledgerFindByNumber(twinB)).length, { timeout: 30_000 }).toBe(1);
@@ -240,7 +255,7 @@ test.describe('Real-document scenarios (fixture PDFs, as-is)', () => {
     expect(twin.risk.reasons.join(' | ')).toMatch(/Same document already registered .* re-numbered resubmission \(−25\)/);
 
     await logout(page);
-    await loginAs(page, /lloyds/i);
+    await loginAs(page, 'lloyds');
     await page.getByRole('button', { name: /^All \(/ }).click();
     const row = page.locator('tr', { has: page.locator('td:first-child', { hasText: twinB }) });
     await expect(row).toHaveCount(1, { timeout: 15_000 });
@@ -253,7 +268,7 @@ test.describe('Real-document scenarios (fixture PDFs, as-is)', () => {
   // form from the (stubbed) extraction — proving the upload -> extract ->
   // form-populate wiring without spending live quota.
   test('OCR — uploading the invoice copy autofills the form (stubbed extraction)', async ({ page }) => {
-    await loginAs(page, /supplier|pennine/i);
+    await loginAs(page, 'supplier1');
     await page.locator('input[type="file"]').first().setInputFiles(PDF_007);
     await expect(field(page, /invoice ?number/i, 'invoiceNumber'), 'invoice number autofilled').toHaveValue(/INV-2026-007/);
     await expect(field(page, /amount/i, 'amount'), 'amount autofilled').toHaveValue(/500000/);
