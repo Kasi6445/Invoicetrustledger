@@ -126,27 +126,40 @@ async function expectDuplicateBlocked(page: Page, dialogs: { last: () => string 
   }
 }
 
+// CR02: a lender's GET /invoices is now filtered to invoices applied to them, so the
+// ledger-state oracle logs in as the SUPPLIER — whose list stays unfiltered and unmasked
+// (the supplier sees `risk`, which these specs assert on).
 let cachedToken: string | null = null;
-async function lenderToken(): Promise<string> {
+async function supplierToken(): Promise<string> {
   if (cachedToken) return cachedToken;
   const r = await fetch('http://localhost:3000/auth/login', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: 'lloyds', password: 'demo123' }),
+    body: JSON.stringify({ username: 'supplier1', password: 'demo123' }),
   }).then((x) => x.json());
   cachedToken = r.token;
   return r.token;
 }
 async function ledgerFind(invoiceNumber: string, amount: number) {
-  const token = await lenderToken();
+  const token = await supplierToken();
   const all: any[] = await fetch('http://localhost:3000/invoices', { headers: { Authorization: `Bearer ${token}` } }).then((x) => x.json());
   if (!Array.isArray(all)) { cachedToken = null; return []; }
   return all.filter((i) => i.invoiceNumber === invoiceNumber && Number(i.amount) === amount);
 }
 async function ledgerFindByNumber(invoiceNumber: string) {
-  const token = await lenderToken();
+  const token = await supplierToken();
   const all: any[] = await fetch('http://localhost:3000/invoices', { headers: { Authorization: `Bearer ${token}` } }).then((x) => x.json());
   if (!Array.isArray(all)) { cachedToken = null; return []; }
   return all.filter((i) => i.invoiceNumber === invoiceNumber);
+}
+// CR02: an invoice reaches a lender's console only once the supplier applies it to them.
+// Idempotent for these state-tolerant specs — a repeat application 409s and is ignored.
+async function applyToLloyds(invoiceId: string) {
+  const token = await supplierToken();
+  await fetch(`http://localhost:3000/invoices/${invoiceId}/apply`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ lender: 'Lloyds Bank Commercial Banking' }),
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -226,6 +239,7 @@ test.describe('Real-document scenarios (fixture PDFs, as-is)', () => {
 
     expect((await ledgerFindByNumber('INV-2026-007')).length).toBe(before.length);
 
+    await applyToLloyds(before[0].invoiceId);   // CR02: put it in Lloyds' queue to be seen
     await logout(page);
     await loginAs(page, 'lloyds');
     await page.getByRole('button', { name: /^All \(/ }).click();
@@ -254,6 +268,7 @@ test.describe('Real-document scenarios (fixture PDFs, as-is)', () => {
     expect(twin.risk.similar?.sameDocument, 'document-hash match must name the twin').toContain(twinA);
     expect(twin.risk.reasons.join(' | ')).toMatch(/Same document already registered .* re-numbered resubmission \(−25\)/);
 
+    await applyToLloyds(twin.invoiceId);        // CR02: put it in Lloyds' queue to be seen
     await logout(page);
     await loginAs(page, 'lloyds');
     await page.getByRole('button', { name: /^All \(/ }).click();

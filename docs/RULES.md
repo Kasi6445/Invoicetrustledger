@@ -32,6 +32,18 @@ passes all 26 checks is a valid implementation.
 | R10 | **Lender anonymity (API layer, not ledger):** one lender never sees another lender's name. For a lender viewer, `financedBy` of a competitor and every foreign `declines` entry become `another financial institution` (decline reasons removed), including inside audit-trail history and error messages. Supplier and payer always see real lender names. The on-chain record stays complete — the chaincode never masks. |
 | R11 | **Similar-invoice detection (API layer, read-time — flag, NEVER block):** R1 closed number reuse; the workaround is re-registering the same invoice under a NEW number, so reads compute a similarity pass across the full ledger. **Strong tier:** identical `docHash` on two+ invoices (excluding `no-document`/absent) → −25 risk points (floor 0) and a `⚠ Same document already registered as …` reason. **Soft tier:** same normalized supplier+payer+amount under different numbers → informational `ℹ Similar invoice(s) on ledger …` reason, zero score change — because different numbers with the same amount is legitimate everyday recurring billing. Flags live inside `risk.similar` (hidden from the payer with the rest of `risk`); matching spans all statuses and never blocks registration — detection in the system, decision with the institution. |
 
+### App-layer rules (CR02 — NOT ledger invariants)
+
+These live in `api/server.js` + the off-chain store. A backend does not implement
+them, and they deliberately never pre-empt a ledger rejection.
+
+| # | Rule |
+|---|------|
+| A1 | **Application to a lender:** `POST /invoices/:id/apply` (supplier only) records `{ lender, status: 'PENDING', appliedAt }` under `applications[invoiceId]` off-chain. The portal calls it once per funder chosen on the register form (a dropdown, so the UI scales to any number of banks); the endpoint itself is not tied to registration and may be called at any time. One invoice stays ONE ledger record — applications are never separate invoiceIds, because R5 is per-invoiceId and splitting them would let the second funder through. The only rule here is **the same lender cannot be applied to twice** (409). There is NO fingerprint check and NO "financed elsewhere" check: a supplier may apply to a second lender even after the first has funded — R5 is what rejects the second funding, at the ledger. |
+| A2 | **Lender-directed visibility:** `GET /invoices` returns, to a lender, only invoices applied to them (`applications[].lender === displayName`) or financed by them. A read filter — the ledger still holds every invoice, and `GET /invoices/:id` is unfiltered. Supplier and payer results are unchanged. |
+| A3 | **Advisory, not a block:** a lender viewing a `FINANCED` invoice they did not fund sees "Already financed by another financial institution" + `financedAt`. The Fund control stays **enabled** — the rejection must come from the ledger (R5), never from the UI. The button is disabled only when this lender is the funder. |
+| A4 | **Mandatory rejection reason:** `POST /invoices/:id/dispute` rejects an empty/whitespace `reason` with `400 { error: "A rejection reason is required." }`. The reason is persisted on-chain via `DisputeInvoice`'s existing `disputeReason` field and shown on the supplier's list. |
+
 ## State machine
 
 ```
@@ -66,7 +78,7 @@ on a `FINANCED` invoice.
 | Field | Supplier (own) | Payer | Lender — not funder | Lender — funder |
 |---|---|---|---|---|
 | Invoice core (number, amount, status, dates) | ✅ | ✅ | ✅ | ✅ |
-| `requestedAmount` | ✅ | ❌ removed | ✅ | ✅ |
+| `requestedAmount` | ✅ | ✅ (CR02) | ✅ | ✅ |
 | `risk` (score/grade/reasons, incl. `similar`) | ✅ | ❌ removed | ✅ | ✅ |
 | `goodsDescription` + supporting-doc access | ✅ | ✅ | ✅ | ✅ |
 | Supplier `bankAccount` | full | last-4 | last-4 | **full** (entitlement) |

@@ -1,7 +1,8 @@
 'use strict';
 // Field-level RBAC rules (read-time, per-viewer; the chain keeps the full truth):
-// - Payer sees commercial truth; NOT full bank details, NOT CDD records, NOT lender
-//   risk/financing economics; and not their own profile echoed back to them.
+// - Payer sees commercial truth (including the requested advance); NOT full bank
+//   details, NOT CDD records, NOT lender risk data; and not their own profile
+//   echoed back to them.
 // - Lender sees funding & risk data + the payer's credit profile. Supplier bank
 //   details stay masked UNLESS this lender funded this invoice (entitlement
 //   unlock). One lender NEVER sees another lender's name — competitor identities
@@ -40,7 +41,9 @@ function maskForRole(invoice, supplierProfile, payerProfile, role, viewerName) {
             sp.cddRecordRef = 'restricted';
         }
         delete out.risk;             // lender underwriting data — restricted for payer
-        delete out.requestedAmount;  // financing economics — not the payer's business
+        // requestedAmount IS shown to the payer (CR02): the advance sought against an
+        // invoice they are being asked to confirm is part of the commercial record they
+        // approve. Lender risk data stays restricted.
         out.supplierProfile = sp;
         out.payerProfile = null;     // the payer already knows their own terms
         return out;

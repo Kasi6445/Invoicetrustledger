@@ -128,20 +128,40 @@ async function fillRegisterForm(page: Page, o: {
   await fillSmart(field(page, /due ?date/i, 'dueDate'), o.dueDate);
 }
 
+// CR02: a lender's GET /invoices is now filtered to invoices applied to them, so the
+// ledger-state oracle logs in as the SUPPLIER — whose list stays unfiltered and unmasked.
 let apiToken: string | null = null;
-async function apiState(requestFetch: typeof fetch, invNo: string) {
+async function supplierToken(requestFetch: typeof fetch) {
   if (!apiToken) {
     const login = await requestFetch('http://localhost:3000/auth/login', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: 'lloyds', password: 'demo123' }),
+      body: JSON.stringify({ username: 'supplier1', password: 'demo123' }),
     }).then((r) => r.json());
     apiToken = login.token;
   }
+  return apiToken;
+}
+async function apiState(requestFetch: typeof fetch, invNo: string) {
+  const token = await supplierToken(requestFetch);
   const all = await requestFetch('http://localhost:3000/invoices', {
-    headers: { Authorization: `Bearer ${apiToken}` },
+    headers: { Authorization: `Bearer ${token}` },
   }).then((r) => r.json());
   if (!Array.isArray(all)) { apiToken = null; return []; }
   return (all as any[]).filter((i) => i.invoiceNumber === invNo);
+}
+
+// CR02: an invoice only reaches a lender's console once the supplier applies it to
+// them. Both demo lenders must see this one — Lloyds funds it, Meridian is the kill shot.
+const LENDERS = ['Lloyds Bank Commercial Banking', 'Meridian Invoice Finance Ltd'];
+async function applyToBothLenders(requestFetch: typeof fetch, invoiceId: string) {
+  const token = await supplierToken(requestFetch);
+  for (const lender of LENDERS) {
+    await requestFetch(`http://localhost:3000/invoices/${invoiceId}/apply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ lender }),
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -172,6 +192,9 @@ test('full invoice lifecycle: register → approve → fund → payment-instruct
     expect(Number(inv.requestedAmount), 'requestedAmount persisted').toBe(450000);
     testInfo.annotations.push({ type: 'docHash', description: inv.docHash });
     await shot(page, 'supplier-registered');
+
+    // CR02: offer it to both funders so it reaches either lender console.
+    await applyToBothLenders(fetch, inv.invoiceId);
   });
 
   await test.step('3. PAYER: approve -> APPROVED', async () => {
