@@ -194,10 +194,6 @@ select:disabled { background: #f6f8f7; color: var(--muted); cursor: not-allowed;
 .login-card .n { font-size: 15px; font-weight: 650; margin-top: 3px; }
 .login-card .d { font-size: 12px; color: var(--muted); margin-top: 6px; }
 
-.chainpill {
-  font-family: var(--mono); font-size: 11px; border-radius: 999px; padding: 3px 10px;
-  border: 1px solid rgba(255,255,255,.3); color: #cfe8db; background: transparent;
-}
 details.reasons summary { cursor: pointer; font-size: 12px; color: var(--muted); }
 details.reasons li { font-size: 12px; }
 details.legend { margin-bottom: 12px; }

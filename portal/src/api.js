@@ -65,7 +65,6 @@ export const fundInvoice    = id => client.post(`/invoices/${id}/fund`, {}).then
 // App-layer only: offer this invoice to a named lender. Returns the updated list.
 export const applyToLender  = (id, lender) => client.post(`/invoices/${id}/apply`, { lender }).then(r => r.data);
 export const declineInvoice = (id, reason) => client.post(`/invoices/${id}/decline`, { reason }).then(r => r.data);
-export const verifyLedger   = () => client.get('/ledger/verify').then(r => r.data);
 export const getPaymentInstructions = id => client.get(`/invoices/${id}/payment-instructions`).then(r => r.data);
 
 // Fetch a supporting document (auth header required, so we can't just link to
