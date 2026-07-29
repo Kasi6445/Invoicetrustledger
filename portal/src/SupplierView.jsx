@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { listInvoices, registerInvoice, aiExtract, getHistory, applyToLender, cancelInvoice } from './api';
+import { listInvoices, registerInvoice, aiExtract, getHistory, applyToLender, cancelInvoice,
+         withdrawApplication } from './api';
 import AuditTrail from './AuditTrail';
 
 // The funders this supplier can offer an invoice to. `name` is byte-identical to the
@@ -16,6 +17,12 @@ const shortName = name => (LENDERS.find(l => l.name === name) || {}).short || na
 // Statuses a supplier may still withdraw from. Mirrors the ledger's own guard —
 // FINANCED / SETTLED / CANCELLED are refused there regardless of what the UI shows.
 const CANCELLABLE = ['REGISTERED', 'APPROVED', 'DISPUTED'];
+
+// Statuses a supplier may CORRECT. A correction is not an edit — the ledger has no
+// edit — it is cancel + re-register under the same number, so the superseded record
+// stays visible forever and the corrected one carries its own document hash. Offered
+// up to approval; past that the invoice is financed and nothing may change.
+const CORRECTABLE = ['REGISTERED', 'APPROVED'];
 
 // Status filters for the My-invoices list — the KPI stat cards and the filter bar
 // both drive these. Their counts line up with the stat-card numbers by design.
@@ -57,6 +64,10 @@ export default function SupplierView({ me }) {
   const [lenders, setLenders] = useState([]);   // funders chosen on the register form
   const [tab, setTab] = useState('register');   // left-pane view: 'register' | 'invoices'
   const [invFilter, setInvFilter] = useState('all');   // My-invoices status filter
+  // Set while the register form is replacing an existing invoice rather than adding a
+  // new one: { invoiceId, invoiceNumber, status }. Drives the banner and makes the
+  // submit button cancel the old record before registering the corrected one.
+  const [correcting, setCorrecting] = useState(null);
 
   const refresh = () => listInvoices().then(setInvoices).catch(() => {});
   useEffect(() => { refresh(); }, []);
@@ -157,6 +168,22 @@ export default function SupplierView({ me }) {
     setResult(null);
     setBusy(true);
     try {
+      // A correction is cancel-then-register, in that order and never merged: the ledger
+      // cannot edit a record, so the old one is withdrawn (freeing its number) and the
+      // corrected document is registered as its own record. Both stay on the chain, which
+      // is the point — the correction is itself evidence. If the cancel is refused we stop
+      // here, because registering would then collide with the still-live number.
+      if (correcting) {
+        try {
+          await cancelInvoice(correcting.invoiceId,
+            `Superseded by a corrected invoice registered by ${me.displayName}.`);
+        } catch (e) {
+          setResult({ ok: false, message: `Could not withdraw ${correcting.invoiceNumber}: ` +
+            `${e.response?.data?.error || e.message} — nothing was changed.` });
+          setBusy(false);
+          return;
+        }
+      }
       const inv = await registerInvoice(fields, files);
       let note = '';
       if (lenders.length) {
@@ -169,9 +196,75 @@ export default function SupplierView({ me }) {
         if (sent.length) note += ` Submitted to ${sent.map(shortName).join(' and ')}.`;
         if (failed.length) note += ` Could not submit to ${failed.join('; ')}.`;
       }
-      setResult({ ok: true, message: `Registered as ${inv.invoiceId} — status ${inv.status}. Document hash anchored on-chain.${note}` });
-      setFields(EMPTY); setFiles(NO_FILES); setLenders([]);
+      setResult({ ok: true, message: correcting
+        ? `${inv.invoiceNumber} corrected — registered as ${inv.invoiceId}, status ${inv.status}, ` +
+          `new document hash anchored on-chain. The superseded record stays on the ledger as CANCELLED.${note}`
+        : `Registered as ${inv.invoiceId} — status ${inv.status}. Document hash anchored on-chain.${note}` });
+      setFields(EMPTY); setFiles(NO_FILES); setLenders([]); setOcrLocked({}); setCorrecting(null);
       setTab('invoices'); setInvFilter('all');   // jump to the list (unfiltered) so the new invoice is in view
+      refresh();
+    } catch (e) {
+      // A correction that fails HERE has already withdrawn the old record — say so, and
+      // keep the form loaded so the supplier can fix the document and submit again.
+      const msg = e.response?.data?.error || e.message;
+      setResult({ ok: false, message: correcting
+        ? `${correcting.invoiceNumber} was withdrawn but the corrected invoice was not registered: ${msg}. ` +
+          `The number is free — re-submit the corrected document below.`
+        : msg });
+      if (correcting) refresh();
+    } finally { setBusy(false); }
+  }
+
+  // Correct an invoice registered in error. NOT an edit: the register form reopens
+  // pre-filled, and submitting withdraws the old record and registers the corrected
+  // document in its place (see register()). A fresh invoice copy is always required —
+  // the whole point is that the anchored hash matches the document that now stands.
+  function startCorrection(inv) {
+    const warning = inv.status === 'APPROVED'
+      ? `\n\n${inv.payerName} has already approved this invoice. Correcting it withdraws that ` +
+        `approval — the corrected invoice starts again at REGISTERED and must be re-approved.`
+      : '';
+    if (!window.confirm(
+      `Correct ${inv.invoiceNumber}?\n\nThe current record is withdrawn (it stays on the ledger as ` +
+      `CANCELLED) and you register the corrected invoice in its place. You will need to upload the ` +
+      `corrected invoice copy.${warning}`)) return;
+
+    setFields({
+      invoiceNumber: '',                         // comes from the corrected document's OCR
+      payerName: inv.payerName || '',
+      amount: inv.amount != null ? String(inv.amount) : '',
+      requestedAmount: inv.requestedAmount != null ? String(inv.requestedAmount) : '',
+      currency: inv.currency || 'GBP',
+      invoiceDate: inv.invoiceDate || '',
+      dueDate: inv.dueDate || '',
+      goodsDescription: inv.goodsDescription || '',
+    });
+    setFiles(NO_FILES);
+    setOcrLocked({});                            // prefill is editable; the new upload re-locks
+    // Carry over the funders still waiting on it, so a correction does not silently drop
+    // the invoice out of every lender's queue. Decided applications are history, not carried.
+    setLenders((inv.applications || []).filter(a => a.status === 'PENDING').map(a => a.lender));
+    setCorrecting({ invoiceId: inv.invoiceId, invoiceNumber: inv.invoiceNumber, status: inv.status });
+    setResult(null); setAiNote(null);
+    setTab('register');
+  }
+
+  function discardCorrection() {
+    setCorrecting(null);
+    setFields(EMPTY); setFiles(NO_FILES); setLenders([]); setOcrLocked({}); setAiNote(null);
+  }
+
+  // Take the invoice off ONE lender's desk. App-layer only — no ledger write, and the
+  // invoice itself is untouched, which is the difference between this and Withdraw.
+  async function withdrawOne(inv, lender) {
+    if (!window.confirm(
+      `Withdraw ${inv.invoiceNumber} from ${shortName(lender)}?\n\n` +
+      `It leaves their queue. The invoice itself stays on the ledger, unchanged.`)) return;
+    setResult(null); setBusy(true);
+    try {
+      await withdrawApplication(inv.invoiceId, lender);
+      setResult({ ok: true, message:
+        `${inv.invoiceNumber} withdrawn from ${shortName(lender)} — no ledger write; the invoice is unchanged.` });
       refresh();
     } catch (e) {
       setResult({ ok: false, message: e.response?.data?.error || e.message });
@@ -181,13 +274,15 @@ export default function SupplierView({ me }) {
   // Withdraw a submission made in error. The reason is required — it is written to
   // the ledger alongside the CANCELLED status, so the withdrawal is itself auditable.
   async function cancelWithReason(id, number) {
-    const reason = window.prompt(`Cancel ${number}? This is recorded on the ledger. Reason (required):`, '');
+    const reason = window.prompt(
+      `Withdraw ${number} from the ledger?\n\nThe record is not deleted — it stays visible as ` +
+      `CANCELLED and the invoice number becomes free to register again.\n\nReason (required):`, '');
     if (reason === null) return;                        // cancelled the cancel
     if (!reason.trim()) { setResult({ ok: false, message: 'A cancellation reason is required.' }); return; }
     setResult(null); setBusy(true);
     try {
       const inv = await cancelInvoice(id, reason.trim());
-      setResult({ ok: true, message: `${inv.invoiceNumber} cancelled — the number is free to register again. The cancelled record stays on the ledger.` });
+      setResult({ ok: true, message: `${inv.invoiceNumber} withdrawn — the number is free to register again. The cancelled record stays on the ledger.` });
       refresh();
     } catch (e) {
       setResult({ ok: false, message: e.response?.data?.error || e.message });
@@ -274,9 +369,28 @@ export default function SupplierView({ me }) {
           {tab === 'register' && (
           <div className="card card-lift">
             <div className="pane-head">
-              <h3>Register a new invoice</h3>
-              <p>Upload the invoice copy — AI reads the details, you review and submit to the ledger.</p>
+              <h3>{correcting ? `Correct ${correcting.invoiceNumber}` : 'Register a new invoice'}</h3>
+              <p>{correcting
+                ? 'Upload the corrected invoice copy. Submitting withdraws the record below and registers the corrected one in its place.'
+                : 'Upload the invoice copy — AI reads the details, you review and submit to the ledger.'}</p>
             </div>
+            {/* A correction is visibly a two-step ledger action, never a silent edit —
+                the supplier is told exactly what happens to the record being replaced. */}
+            {correcting && (
+              <div className="correcting-banner">
+                <div>
+                  <strong>Correcting {correcting.invoiceNumber}</strong>
+                  <span>
+                    {correcting.invoiceId} · currently {correcting.status} — it will be withdrawn
+                    (kept on the ledger as CANCELLED) the moment you register the corrected invoice.
+                    {correcting.status === 'APPROVED' && ' The payer will need to approve again.'}
+                  </span>
+                </div>
+                <button type="button" className="btn" disabled={busy} onClick={discardCorrection}>
+                  Discard correction
+                </button>
+              </div>
+            )}
         <label className="dropzone">
           <span className="dz-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" width="22" height="22" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -303,8 +417,8 @@ export default function SupplierView({ me }) {
           {/* System-filled, never typed: the invoice number is whatever OCR read off
               the uploaded copy, so the registered number always matches the anchored
               document. A supplier cannot re-key it to dodge the one-number-one-
-              registration rule — and if it is wrong, the fix is a corrected document
-              (or Cancel request, which frees the number again). */}
+              registration rule — and if it is wrong, the fix is Correct invoice, which
+              re-registers from a corrected document under the same number. */}
           {/* OCR-sourced fields lock to read-only ONLY when OCR read them; if OCR failed
               or left a field blank it stays editable so the supplier can type it. */}
           <label className="f"><span>Invoice number</span>
@@ -427,8 +541,11 @@ export default function SupplierView({ me }) {
         </div>
 
         <div className="register-actions">
-          <button className="btn primary btn-lg" disabled={!canSubmit}
-                  onClick={register}>{busy ? 'Registering…' : 'Register on ledger'}</button>
+          <button className="btn primary btn-lg" disabled={!canSubmit} onClick={register}>
+            {busy
+              ? (correcting ? 'Correcting…' : 'Registering…')
+              : (correcting ? 'Withdraw & register corrected' : 'Register on ledger')}
+          </button>
           <span className="register-hint" aria-hidden="true">
             🔒 The document hash is anchored on-chain at registration — tamper-proof from this moment.
           </span>
@@ -458,9 +575,11 @@ export default function SupplierView({ me }) {
                       Payer's reason: {inv.disputeReason || 'none recorded'}
                     </div>)}
                 </td>
-                {/* Read-only: funders are chosen on the register form, so this column
-                    lists only what this invoice was actually submitted to — it never
-                    grows a control per bank. */}
+                {/* Funders are chosen on the register form; the only control here is the
+                    × that takes the invoice back off ONE lender's desk. It appears on
+                    PENDING submissions only — a lender's FINANCED or DECLINED decision is
+                    on the record and the supplier cannot un-say it. Withdrawing here is
+                    app-layer: no ledger write, and the invoice itself is untouched. */}
                 <td style={{ minWidth: 150 }}>
                   {(inv.applications || []).length === 0
                     ? <span className="sub">—</span>
@@ -469,17 +588,33 @@ export default function SupplierView({ me }) {
                           <span key={a.lender} className={`applied applied-${a.status}`}
                                 title={`${a.lender} — submitted ${new Date(a.appliedAt).toLocaleString()}`}>
                             {shortName(a.lender)} <span className={`state state-${a.status}`}>{a.status}</span>
+                            {/* No × once the invoice is CANCELLED: the lender keeps seeing
+                                it was offered and then withdrawn, which is the honest record,
+                                but there is nothing left to withdraw from. */}
+                            {a.status === 'PENDING' && inv.status !== 'CANCELLED' && (
+                              <button type="button" className="chip-x" disabled={busy}
+                                      title={`Withdraw from ${shortName(a.lender)} — the invoice is not affected`}
+                                      onClick={() => withdrawOne(inv, a.lender)}>×</button>
+                            )}
                           </span>
                         ))}
                       </div>}
                 </td>
                 <td className="sub">{new Date(inv.registeredAt).toLocaleString()}</td>
                 <td style={{ whiteSpace: 'nowrap' }}>
-                  {/* Withdraw a mistaken submission. Hidden once financing has happened —
-                      the ledger enforces that too, this only keeps the console honest. */}
+                  {/* Two different things, deliberately named apart: CORRECT replaces a
+                      record whose details were wrong, WITHDRAW takes it off the ledger
+                      altogether. Both are hidden once financing has happened — the ledger
+                      enforces that too, this only keeps the console honest. */}
+                  {CORRECTABLE.includes(inv.status) && (
+                    <><button className="btn" disabled={busy}
+                              title="Replace this record with a corrected invoice"
+                              onClick={() => startCorrection(inv)}>Correct invoice</button>{' '}</>
+                  )}
                   {CANCELLABLE.includes(inv.status) && (
                     <><button className="btn danger" disabled={busy}
-                              onClick={() => cancelWithReason(inv.invoiceId, inv.invoiceNumber)}>Cancel request</button>{' '}</>
+                              title="Withdraw this invoice from the ledger — the record stays as CANCELLED"
+                              onClick={() => cancelWithReason(inv.invoiceId, inv.invoiceNumber)}>Withdraw invoice</button>{' '}</>
                   )}
                   <button className="btn" disabled={busy}
                           onClick={async () => { try { setTrail(await getHistory(inv.invoiceId)); } catch {} }}>Audit trail</button></td>
@@ -489,9 +624,11 @@ export default function SupplierView({ me }) {
         </table>
         </div>
         <p className="sub" style={{ marginBottom: 0, marginTop: 12 }}>
-          Lenders are chosen when the invoice is registered. Submitting to a lender is an
-          application-layer action — no ledger write — and the same lender cannot be
-          submitted to twice for one invoice.
+          Lenders are chosen when the invoice is registered. Submitting to a lender — and the
+          × that withdraws it again — is an application-layer action: no ledger write, and the
+          invoice is untouched. <strong>Correct invoice</strong> and <strong>Withdraw invoice</strong> are
+          ledger actions: nothing is ever edited or deleted, so a corrected invoice leaves the
+          superseded record on the chain as CANCELLED.
         </p>
           </div>
           )}

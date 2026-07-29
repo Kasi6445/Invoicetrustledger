@@ -74,6 +74,10 @@ export const cancelInvoice  = (id, reason) => client.post(`/invoices/${id}/cance
 export const fundInvoice    = id => client.post(`/invoices/${id}/fund`, {}).then(r => r.data);
 // App-layer only: offer this invoice to a named lender. Returns the updated list.
 export const applyToLender  = (id, lender) => client.post(`/invoices/${id}/apply`, { lender }).then(r => r.data);
+// App-layer only, and the mirror of applyToLender: take this invoice back off ONE
+// lender's desk without touching the invoice itself. PENDING submissions only.
+export const withdrawApplication = (id, lender) =>
+  client.post(`/invoices/${id}/withdraw-application`, { lender }).then(r => r.data);
 export const declineInvoice = (id, reason) => client.post(`/invoices/${id}/decline`, { reason }).then(r => r.data);
 export const getPaymentInstructions = id => client.get(`/invoices/${id}/payment-instructions`).then(r => r.data);
 

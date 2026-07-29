@@ -184,6 +184,47 @@ app.post('/invoices/:id/apply', auth('supplier'), async (req, res, next) => {
     } catch (e) { next(e); }
 });
 
+/* ---- STEP 1c: supplier withdraws ONE lender's application ----
+   The mirror of 1b, and app-layer for the same reason: nothing here is a ledger fact,
+   so withdrawing writes nothing to the chain and leaves the invoice untouched. This is
+   how a supplier says "not with this bank" WITHOUT cancelling the invoice itself.
+   Only a PENDING application can be withdrawn — once a lender has funded or declined,
+   that is a decision on the record and the supplier cannot un-say it. */
+app.post('/invoices/:id/withdraw-application', auth('supplier'), async (req, res, next) => {
+    try {
+        const id = req.params.id;
+        const lender = String((req.body && req.body.lender) || '').trim();
+        if (!lender) return next(new ApiError(400, 'VALIDATION_ERROR', 'A lender is required.'));
+
+        // Ownership is checked against the LEDGER, not the off-chain store — the
+        // applications map is keyed by invoiceId alone and would otherwise let any
+        // supplier withdraw another supplier's submission.
+        const ledger = await getLedger();
+        const inv = JSON.parse(await ledger.evaluate('ReadInvoice', id));
+        if (String(inv.supplierCRN).trim().toUpperCase() !== String(req.user.supplierCRN).trim().toUpperCase())
+            return next(new ApiError(403, 'FORBIDDEN', 'You can only withdraw your own submissions.'));
+
+        const db = offchain.load();
+        const list = db.applications[id] || [];
+        if (!list.some(a => a.lender === lender)) return next(new ApiError(404, 'NOT_FOUND',
+            'This invoice has not been submitted to that lender.'));
+
+        // The stored status is ALWAYS 'PENDING' — a decided application is derived from
+        // the ledger on read (see GET /invoices), so the guard must derive it too or a
+        // supplier could withdraw the very lender that financed them.
+        const decided =
+            inv.financedBy === lender ? (inv.status === 'SETTLED' ? 'SETTLED' : 'FINANCED')
+                : (inv.declines || []).some(d => d.by === lender) ? 'DECLINED'
+                    : null;
+        if (decided) return next(new ApiError(409, 'ALREADY_DECIDED',
+            `That submission is ${decided} and can no longer be withdrawn.`));
+
+        db.applications[id] = list.filter(a => a.lender !== lender);
+        offchain.save(db);
+        res.json(db.applications[id]);
+    } catch (e) { next(e); }
+});
+
 /* ---- STEP 2: payer approves / disputes ---- */
 app.post('/invoices/:id/approve', auth('payer'), approveUpload, async (req, res, next) => {
     try {

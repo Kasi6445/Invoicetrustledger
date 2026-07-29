@@ -130,13 +130,26 @@ tr:hover td { background: #fafcfb; }
 .applied-DECLINED { background: var(--red-bg); border-color: #ecb7bc; }
 .applied-DECLINED .state.state-DECLINED { color: var(--red); font-weight: 700; }
 .applied .state.state-PENDING { color: var(--amber); }
-/* remove-a-chosen-funder affordance on the register form */
+/* remove-a-chosen-funder affordance: on the register form, and on a PENDING chip in
+   the invoice list where it withdraws that one submission (no ledger write) */
 .chip-x {
   background: none; border: 0; padding: 0 0 0 2px; line-height: 1;
   font-size: 13px; color: var(--muted);
 }
 .chip-x:hover { color: var(--red); }
 .chip-x:disabled { opacity: .5; cursor: not-allowed; }
+
+/* The register form in correction mode — states plainly which record is being replaced
+   and what becomes of it, so a correction never reads as a silent edit. */
+.correcting-banner {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 14px;
+  background: var(--amber-bg); border: 1px solid #ecd9a8;
+  border-left: 4px solid var(--amber); border-radius: 10px;
+  padding: 12px 14px; margin-bottom: 16px;
+}
+.correcting-banner strong { display: block; font-size: 13px; color: var(--ink); }
+.correcting-banner span { display: block; margin-top: 3px; font-size: 12px; color: var(--muted); line-height: 1.5; }
+.correcting-banner .btn { flex: 0 0 auto; }
 
 /* payer's goods-received note — the upload sat under the documents in the approval row */
 .grn { display: block; margin-top: 10px; font-size: 12px; color: var(--muted); }
