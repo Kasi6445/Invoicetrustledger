@@ -38,6 +38,17 @@ export default function LenderView({ me }) {
   const activeTab = TABS.find(t => t.key === tab);
   const visible = invoices.filter(inv => activeTab.match(inv) && matchesSearch(inv));
 
+  // Portfolio summary for the KPI band. Each queue's count equals the rows its
+  // card opens (the search box narrows further, but the card count is the queue total).
+  const fundedList = invoices.filter(fundedByMe);
+  const stats = {
+    ready: invoices.filter(inv => inv.status === 'APPROVED' && !declinedByMe(inv)).length,
+    funded: fundedList.length,
+    fundedValue: fundedList.reduce((s, i) => s + (Number(i.amount) || 0), 0),
+    declined: invoices.filter(declinedByMe).length,
+    queue: invoices.length,
+  };
+
   async function fund(id) {
     setBlocked(null); setFunded(null);
     setFundingId(id);
@@ -94,38 +105,54 @@ export default function LenderView({ me }) {
   }
 
   return (
-    <div>
-      <p className="eyebrow">Steps 4–5 · Verify &amp; fund</p>
-      <h2 style={{ margin: '0 0 12px' }}>Lender console — {me.displayName}</h2>
-
-      {blocked && (
-        <div className="rejected">
-          <div className="headline">⛔ Ledger rejected this transaction</div>
-          <div className="ledger-says">{blocked}</div>
+    <div className="supplier-view">
+      <section className="sv-hero">
+        <div className="sv-hero-head">
+          <div>
+            <h2>Lender console</h2>
+            <p>{me.displayName} — verify provenance and finance payer-approved invoices.</p>
+          </div>
         </div>
-      )}
-      {funded && <div className="notice-ok">✓ {funded}</div>}
+        <div className="sv-stats cols-5">
+          <button type="button" className={`stat${tab === 'all' ? ' active' : ''}`}
+                  aria-label={`All (${stats.queue})`} onClick={() => setTab('all')}>
+            <span className="stat-val">{stats.queue}</span><span className="stat-lab">All Invoice</span>
+          </button>
+          <button type="button" className={`stat${tab === 'ready' ? ' active' : ''}`}
+                  aria-label={`Ready to fund (${stats.ready})`} onClick={() => setTab('ready')}>
+            <span className="stat-val">{stats.ready}</span><span className="stat-lab">Ready to fund</span>
+          </button>
+          <button type="button" className={`stat${tab === 'funded' ? ' active' : ''}`}
+                  aria-label={`Funded by me (${stats.funded})`} onClick={() => setTab('funded')}>
+            <span className="stat-val">{stats.funded}</span><span className="stat-lab">Funded</span>
+          </button>
+          <button type="button" className={`stat${tab === 'declined' ? ' active' : ''}`}
+                  aria-label={`Declined by me (${stats.declined})`} onClick={() => setTab('declined')}>
+            <span className="stat-val">{stats.declined}</span><span className="stat-lab">Declined</span>
+          </button>
+          <div className="stat"><span className="stat-val">{gbp(stats.fundedValue)}</span><span className="stat-lab">Financed value</span></div>
+        </div>
+      </section>
 
-      <div className="card">
+      <div className="sv-content solo">
+          {blocked && (
+            <div className="rejected">
+              <div className="headline">⛔ Ledger rejected this transaction</div>
+              <div className="ledger-says">{blocked}</div>
+            </div>
+          )}
+          {funded && <div className="notice-ok">✓ {funded}</div>}
+
+          <div className="card card-lift">
+            <div className="pane-head">
+              <h3>{activeTab.label} · {visible.length} of {invoices.filter(activeTab.match).length}</h3>
+              <p>Rule-based, ledger-derived risk grades — expand any grade to see every reason. Pick a queue from the cards above.</p>
+            </div>
         <input
           type="text" placeholder="Search supplier, payer or invoice number…"
           value={search} onChange={e => setSearch(e.target.value)}
           style={{ width: '100%', boxSizing: 'border-box', padding: '8px 12px', fontSize: 13,
                    border: '1px solid var(--line)', borderRadius: 8, marginBottom: 10 }} />
-        <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
-          {TABS.map(t => {
-            const count = invoices.filter(inv => t.match(inv)).length;
-            const active = t.key === tab;
-            return (
-              <button key={t.key} className="btn" onClick={() => setTab(t.key)}
-                      style={active
-                        ? { background: 'var(--ink)', color: '#fff', borderColor: 'var(--ink)' }
-                        : undefined}>
-                {t.label} ({count})
-              </button>
-            );
-          })}
-        </div>
         <details className="legend">
           <summary>How the risk grade is calculated</summary>
           <div className="legend-body">
@@ -156,6 +183,7 @@ export default function LenderView({ me }) {
             </p>
           </div>
         </details>
+        <div className="table-scroll">
         <table>
           <thead>
             <tr><th>Invoice</th><th>Supplier</th><th>Amount</th><th>Payer terms</th><th>Status</th><th>Risk</th><th></th></tr>
@@ -251,10 +279,12 @@ export default function LenderView({ me }) {
             })}
           </tbody>
         </table>
-        <p className="sub" style={{ marginBottom: 0 }}>
+        </div>
+        <p className="sub" style={{ marginBottom: 0, marginTop: 12 }}>
           Risk grades are rule-based and ledger-derived — expand a grade to see every reason. CDD records are masked; bank account shown last-4 only.
         </p>
-      </div>
+          </div>
+        </div>
 
       {trail && <AuditTrail trail={trail} onClose={() => setTrail(null)} />}
 

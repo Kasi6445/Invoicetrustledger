@@ -67,8 +67,45 @@ CODE=$(curl -s -o /tmp/itl_body -w "%{http_code}" $API/invoices -H "Authorizatio
 [ "$CODE" = "415" ] && grep -q '"code":"UPLOAD_TYPE"' /tmp/itl_body \
   && ok "wrong-type file (.txt) → 415 rejected" || bad "wrong-type upload" "HTTP $CODE $(cat /tmp/itl_body)"
 
-rm -f /tmp/itl_big.pdf /tmp/itl_bad.txt /tmp/itl_body
+# ---- R12: supplier cancellation releases the number; financing is never releasable ----
+# A tiny unique PDF per run so these checks never collide with earlier ones or with
+# the demo fixtures (the invoice copy is mandatory and its hash is anchored).
+printf '%%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\n%% reg %s\ntrailer<</Root 1 0 R>>\n%%%%EOF\n' "$$-$(date +%s%N)" > /tmp/itl_cancel.pdf
+CNUM="INV-CANCEL-$(date +%s)"
+reg_invoice() {   # $1 = invoice number, $2 = amount -> echoes invoiceId (empty on failure)
+  curl -s $API/invoices -H "Authorization: Bearer $ST" \
+    -F "invoiceNumber=$1" -F "payerName=Northfield Retail Group plc" -F "amount=$2" \
+    -F "requestedAmount=$(( $2 * 8 / 10 ))" -F "currency=GBP" -F "invoiceDate=2026-07-01" \
+    -F "dueDate=2026-09-30" -F "invoiceCopy=@/tmp/itl_cancel.pdf" \
+    | sed -n 's/.*"invoiceId":"\([^"]*\)".*/\1/p'
+}
+
+# 1. register → cancel → RE-REGISTER THE SAME NUMBER succeeds
+ID1=$(reg_invoice "$CNUM" 100000)
+curl -s -o /tmp/itl_body -X POST $API/invoices/$ID1/cancel -H "Authorization: Bearer $ST" \
+  -H 'Content-Type: application/json' -d '{"reason":"keyed the wrong amount"}' >/dev/null
+ID2=$(reg_invoice "$CNUM" 250000)
+CANCELLED=$(curl -s $API/invoices/$ID1 -H "Authorization: Bearer $ST" | grep -c '"status":"CANCELLED"')
+[ -n "$ID2" ] && [ "$CANCELLED" = "1" ] \
+  && ok "cancel releases the number: same number re-registers, old record stays CANCELLED" \
+  || bad "re-register after cancel" "newId='$ID2' cancelledFlag=$CANCELLED"
+
+# 2. a FINANCED invoice can NEVER be cancelled (protects the duplicate-financing block)
+PT2=$(tok payer1)
+ID3=$(reg_invoice "INV-CANCEL-FIN-$(date +%s)" 100000)
+curl -s -o /dev/null -X POST $API/invoices/$ID3/approve -H "Authorization: Bearer $PT2" \
+  -H 'Content-Type: application/json' -d '{"goodsReceivedConfirmed":true}'
+curl -s -o /dev/null -X POST $API/invoices/$ID3/fund -H "Authorization: Bearer $LT"
+CODE=$(curl -s -o /tmp/itl_body -w "%{http_code}" -X POST $API/invoices/$ID3/cancel \
+  -H "Authorization: Bearer $ST" -H 'Content-Type: application/json' -d '{"reason":"trying to unwind"}')
+STILL=$(curl -s $API/invoices/$ID3 -H "Authorization: Bearer $ST" | grep -c '"status":"FINANCED"')
+[ "$CODE" = "409" ] && grep -q "CANCEL BLOCKED: invoice already financed" /tmp/itl_body && [ "$STILL" = "1" ] \
+  && ok "cancel of a FINANCED invoice → blocked, invoice still FINANCED" \
+  || bad "cancel after financed" "HTTP $CODE stillFinanced=$STILL $(cat /tmp/itl_body)"
+
+rm -f /tmp/itl_big.pdf /tmp/itl_bad.txt /tmp/itl_body /tmp/itl_cancel.pdf
 
 echo "———————————————"
 echo "HARDENING RESULT: $PASS passed, $FAIL failed (plus 26/26 baseline above)"
+echo "(includes 2 R12 cancellation checks)"
 [ $FAIL -eq 0 ]

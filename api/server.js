@@ -47,6 +47,12 @@ const upload = multer({
 // to accept uploads and to validate the :type on the download route.
 const REGISTER_DOCS = ['invoiceCopy', 'purchaseOrder', 'goodsReceived'];
 const registerUpload = upload.fields(REGISTER_DOCS.map(name => ({ name, maxCount: 1 })));
+// The payer's proof of receipt, attached at approval — not a registration document,
+// so it is NOT anchored on-chain and cannot be integrity-verified against the ledger.
+// It is streamable like the others, hence a wider whitelist for the read route only.
+const PAYER_DOC = 'goodsReceivedNote';
+const VIEWABLE_DOCS = [...REGISTER_DOCS, PAYER_DOC];
+const approveUpload = upload.single(PAYER_DOC);
 
 /* ---- auth ---- */
 const loginLimiter = rateLimit({
@@ -83,8 +89,23 @@ function auth(...roles) {
 // Attach the off-chain goods description (commercial narrative, not on-chain) to
 // an invoice record before scoring/masking so reads can surface it. Not sensitive
 // per role — payer approves against it, lender reads it for context.
+// Statuses that can only have been reached THROUGH payer approval.
+const PAST_APPROVAL = ['APPROVED', 'FINANCED', 'SETTLED'];
+
 const withGoods = (inv, db) => {
     inv.goodsDescription = (db.goodsDescriptions && db.goodsDescriptions[inv.invoiceId]) || null;
+    // Goods-received confirmation (off-chain attestation, see the approve route).
+    // Anything already past approval — seed data, autoSeed, invoices approved before
+    // this field existed — is treated as confirmed, so the demo never asks for a
+    // re-tick on a record the payer can no longer act on.
+    const rec = (db.goodsReceipts && db.goodsReceipts[inv.invoiceId]) || null;
+    inv.goodsReceivedConfirmed = rec ? rec.goodsReceivedConfirmed === true
+                                     : PAST_APPROVAL.includes(inv.status);
+    inv.goodsReceivedAt = rec ? rec.confirmedAt : null;   // null = assumed, not attested
+    // Presence + hash of the payer's proof-of-receipt document, so a viewer knows
+    // whether there is a file to open. The file itself streams from the doc route.
+    inv.goodsReceivedNote = rec && rec.fileName
+        ? { fileName: rec.originalName || rec.fileName, sha256: rec.sha256 } : null;
     return inv;
 };
 
@@ -164,10 +185,43 @@ app.post('/invoices/:id/apply', auth('supplier'), async (req, res, next) => {
 });
 
 /* ---- STEP 2: payer approves / disputes ---- */
-app.post('/invoices/:id/approve', auth('payer'), async (req, res, next) => {
+app.post('/invoices/:id/approve', auth('payer'), approveUpload, async (req, res, next) => {
     try {
+        const id = req.params.id;
+        // Hash the proof of receipt BEFORE the ledger call, but write it only after —
+        // same discipline as registration, so a rejected approval leaves no orphan file.
+        const f = req.file;
+        const proof = f ? {
+            sha256: crypto.createHash('sha256').update(f.buffer).digest('hex'),
+            fileName: `${id}-${PAYER_DOC}-${f.originalname}`,
+            originalName: f.originalname, buffer: f.buffer
+        } : null;
+
         const ledger = await getLedger();
-        res.json(JSON.parse(await ledger.submit('ApproveInvoice', req.params.id, req.user.displayName)));
+        const out = JSON.parse(await ledger.submit('ApproveInvoice', id, req.user.displayName));
+
+        // The payer's goods receipt is a commercial attestation, NOT a fraud-blocking
+        // rule — recorded OFF-CHAIN only, never anchored, and it never gates the ledger
+        // write. The portal requires the attachment; the API records what it is given,
+        // which keeps the curl/e2e conformance suites (bodyless approve) passing.
+        const confirmed = proof || (req.body && String(req.body.goodsReceivedConfirmed) === 'true');
+        if (confirmed) {
+            const db = offchain.load();
+            if (!db.goodsReceipts) db.goodsReceipts = {};
+            const rec = { goodsReceivedConfirmed: true,
+                confirmedBy: req.user.displayName, confirmedAt: new Date().toISOString() };
+            if (proof) {
+                fs.mkdirSync(path.join(__dirname, 'data', 'docs'), { recursive: true });
+                fs.writeFileSync(path.join(__dirname, 'data', 'docs', proof.fileName), proof.buffer);
+                Object.assign(rec, { fileName: proof.fileName, originalName: proof.originalName, sha256: proof.sha256 });
+                // Mirror into docs[] so the existing stream route finds it by type.
+                db.docs[id] = { ...(db.docs[id] || {}),
+                    [PAYER_DOC]: { fileName: proof.fileName, sha256: proof.sha256 } };
+            }
+            db.goodsReceipts[id] = rec;
+            offchain.save(db);
+        }
+        res.json(out);
     } catch (e) { next(new ApiError(409, 'LEDGER_REJECTED', e.message)); }
 });
 
@@ -179,6 +233,20 @@ app.post('/invoices/:id/dispute', auth('payer'), async (req, res, next) => {
         if (!reason) return next(new ApiError(400, 'VALIDATION_ERROR', 'A rejection reason is required.'));
         const ledger = await getLedger();
         res.json(JSON.parse(await ledger.submit('DisputeInvoice', req.params.id, req.user.displayName, reason)));
+    } catch (e) { next(new ApiError(409, 'LEDGER_REJECTED', e.message)); }
+});
+
+/* ---- STEP 2b: supplier cancels their own mistaken submission ----
+   Owner-only, and the ledger independently re-checks ownership from the CRN, so
+   bypassing this route cannot cancel someone else's invoice. Releasing the number
+   index is a LEDGER action; nothing is deleted here. ---- */
+app.post('/invoices/:id/cancel', auth('supplier'), async (req, res, next) => {
+    try {
+        const reason = String((req.body && req.body.reason) || '').trim();
+        if (!reason) return next(new ApiError(400, 'VALIDATION_ERROR', 'A cancellation reason is required.'));
+        const ledger = await getLedger();
+        res.json(JSON.parse(await ledger.submit('CancelInvoice',
+            req.params.id, req.user.supplierCRN, reason)));
     } catch (e) { next(new ApiError(409, 'LEDGER_REJECTED', e.message)); }
 });
 
@@ -238,7 +306,23 @@ app.get('/invoices', auth(), async (req, res, next) => {
         res.json(rows.map(inv => {
             const out = maskForRole(riskScore(withGoods(inv, db), all, db.payerProfiles[inv.payerName]), db.supplierProfiles[inv.supplierCRN], db.payerProfiles[inv.payerName], req.user.role, req.user.displayName);
             // The supplier sees where they have applied; nobody else needs the list.
-            if (req.user.role === 'supplier') out.applications = db.applications[inv.invoiceId] || [];
+            // Reflect the ledger's truth in each application's status: the lender that
+            // actually financed reads FINANCED (or SETTLED once paid), any lender that
+            // declined reads DECLINED, and everyone still in the queue stays PENDING.
+            // Derived on read (the stored value is only ever 'PENDING') so it can never
+            // drift from the ledger. Safe to use the raw `inv` — the supplier's own list
+            // is unmasked, so financedBy is the real funder name.
+            if (req.user.role === 'supplier') {
+                out.applications = (db.applications[inv.invoiceId] || []).map(a => ({
+                    ...a,
+                    status:
+                        inv.financedBy === a.lender
+                            ? (inv.status === 'SETTLED' ? 'SETTLED' : 'FINANCED')
+                            : (inv.declines || []).some(d => d.by === a.lender)
+                                ? 'DECLINED'
+                                : a.status,
+                }));
+            }
             return out;
         }));
     } catch (e) { next(e); }
@@ -273,7 +357,7 @@ app.get('/invoices/:id/doc/:type', auth('supplier', 'payer', 'lender'), async (r
     try {
         const { id, type } = req.params;
         // Whitelist the type — never interpolate a caller-supplied name into a path.
-        if (!REGISTER_DOCS.includes(type))
+        if (!VIEWABLE_DOCS.includes(type))
             return next(new ApiError(400, 'VALIDATION_ERROR', `Unknown document type ${type}`));
 
         const ledger = await getLedger();
@@ -304,6 +388,11 @@ app.get('/invoices/:id/doc/:type', auth('supplier', 'payer', 'lender'), async (r
 app.get('/invoices/:id/doc/:type/verify', auth('supplier', 'payer', 'lender'), async (req, res, next) => {
     try {
         const { id, type } = req.params;
+        // The payer's proof of receipt is never anchored, so there is nothing to
+        // verify it against — say so, rather than calling a real type unknown.
+        if (type === PAYER_DOC)
+            return next(new ApiError(400, 'VALIDATION_ERROR',
+                `${PAYER_DOC} is stored off-chain only and has no ledger anchor to verify against`));
         if (!REGISTER_DOCS.includes(type))
             return next(new ApiError(400, 'VALIDATION_ERROR', `Unknown document type ${type}`));
 
@@ -409,7 +498,14 @@ app.get('/ledger/verify', auth(), async (req, res, next) => {
 app.post('/ai/extract', auth('supplier'), upload.single('doc'), async (req, res, next) => {
     try {
         if (!req.file) return next(new ApiError(400, 'VALIDATION_ERROR', 'Attach an invoice file'));
-        res.json(await extractInvoice(req.file.buffer, req.file.mimetype));
+        const result = await extractInvoice(req.file.buffer, req.file.mimetype);
+        // The model determined this file is not a valid invoice — refuse it loudly so
+        // the portal can warn the supplier, instead of pre-filling a bogus registration.
+        if (result && result.notInvoice) {
+            return next(new ApiError(422, 'NOT_AN_INVOICE',
+                'This file does not look like a valid invoice — no invoice number or amount could be read. Please upload a proper invoice document.'));
+        }
+        res.json(result);
     } catch (e) { next(e); }
 });
 

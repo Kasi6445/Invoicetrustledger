@@ -17,6 +17,9 @@ const crypto = require('crypto');
  *   R5. A FINANCED invoice can NEVER be financed again (duplicate financing blocked).
  *   R6. Only a FINANCED invoice can be SETTLED.
  *   R7. Every state change is permanently recorded with a tx id + timestamp.
+ *   R12. A supplier may CANCEL their own pre-financing invoice: the record stays
+ *       on-chain as CANCELLED and only the number index is released, freeing the
+ *       number for re-registration. FINANCED/SETTLED can never be cancelled.
  */
 class InvoiceContract extends Contract {
 
@@ -171,6 +174,47 @@ class InvoiceContract extends Contract {
         invoice.approvedAt = this._txTime(ctx);
         await ctx.stub.putState(`INV_${invoiceId}`, Buffer.from(JSON.stringify(invoice)));
         return JSON.stringify(invoice);
+    }
+
+    // ---------- STEP 2b: CANCEL (supplier) ----------
+    // R12 "a mistake is withdrawable, never erasable": the supplier may cancel their
+    // OWN invoice while it is still pre-financing. Nothing is deleted — the INV_
+    // record stays on-chain as CANCELLED with its full history. Only the NUM_ index
+    // key is released, which is what frees the invoice number for a corrected
+    // re-registration. The financing lock lives on the INV_ record's status and is
+    // untouched, so this can never reopen a financed invoice (R5).
+    async CancelInvoice(ctx, invoiceId, supplierCRN, reason) {
+        const inv = await this._getInvoice(ctx, invoiceId);
+        const txTime = this._txTime(ctx);   // mock binds its own; the block below is shared
+
+        // ==== shared rule block — byte-identical in api/mockLedger.js ====
+        if (String(inv.supplierCRN).trim().toUpperCase() !== String(supplierCRN).trim().toUpperCase()) {
+            throw new Error(
+                `CANCEL BLOCKED: only the supplier that registered invoice ${invoiceId} may cancel it.`);
+        }
+        if (inv.status === 'FINANCED') {
+            throw new Error(
+                `CANCEL BLOCKED: invoice already financed — invoice ${invoiceId} was financed at ` +
+                `${inv.financedAt} and can never be cancelled or re-registered.`);
+        }
+        if (inv.status === 'SETTLED') {
+            throw new Error(`CANCEL BLOCKED: invoice ${invoiceId} is SETTLED and can no longer be cancelled.`);
+        }
+        if (inv.status === 'CANCELLED') {
+            throw new Error(`CANCEL BLOCKED: invoice ${invoiceId} is already CANCELLED.`);
+        }
+        if (!['REGISTERED', 'APPROVED', 'DISPUTED'].includes(inv.status)) {
+            throw new Error(`CANCEL BLOCKED: invoice ${invoiceId} is ${inv.status} and cannot be cancelled.`);
+        }
+        inv.status = 'CANCELLED';
+        inv.cancelledAt = txTime;
+        inv.cancelReason = reason;
+        // ==== end shared rule block ====
+
+        await ctx.stub.putState(`INV_${invoiceId}`, Buffer.from(JSON.stringify(inv)));
+        // Release the uniqueness index ONLY — this is the whole mechanism.
+        await ctx.stub.deleteState(`NUM_${this._numberKeyHash(inv.invoiceNumber, inv.supplierCRN)}`);
+        return JSON.stringify(inv);
     }
 
     // ---------- STEP 3b: DECLINE (lender) ----------

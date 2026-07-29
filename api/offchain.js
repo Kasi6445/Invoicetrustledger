@@ -39,14 +39,19 @@ function load() {
             // Financing applications (app layer, NOT a ledger fact): which lenders the
             // supplier has offered this invoice to. invoiceId -> [ { lender, status, appliedAt } ].
             // `lender` is the lender's displayName so it compares directly with financedBy.
-            applications: {}
+            applications: {},
+            // Payer goods-received attestations (app layer, NOT a ledger fact, NOT a fraud
+            // rule): invoiceId -> { goodsReceivedConfirmed, confirmedBy, confirmedAt,
+            // fileName, originalName, sha256 } — the last three when a proof was attached.
+            goodsReceipts: {}
         };
         fs.mkdirSync(path.dirname(FILE), { recursive: true });
         fs.writeFileSync(FILE, JSON.stringify(seed, null, 2));
     }
     const db = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-    // Backward compat: stores written before applications existed must still load.
+    // Backward compat: stores written before these keys existed must still load.
     if (!db.applications) db.applications = {};
+    if (!db.goodsReceipts) db.goodsReceipts = {};
     return db;
 }
 

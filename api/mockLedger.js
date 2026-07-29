@@ -143,6 +143,42 @@ module.exports = function mockLedger() {
             inv.status = 'DISPUTED'; inv.approvedBy = args[1];
             inv.disputeReason = args[2]; inv.approvedAt = timestamp;
 
+        } else if (fn === 'CancelInvoice') {
+            // R12 "a mistake is withdrawable, never erasable": the supplier may cancel
+            // their OWN invoice while it is still pre-financing. Nothing is deleted —
+            // the record stays as CANCELLED with its full history. Only the number-key
+            // index is released, which frees the number for a corrected re-registration.
+            // The financing lock lives on the record's status and is untouched (R5).
+            const [invoiceId, supplierCRN, reason] = args;
+            const txTime = timestamp;   // chaincode binds its own; the block below is shared
+
+            // ==== shared rule block — byte-identical in chaincode/lib/invoiceContract.js ====
+            if (String(inv.supplierCRN).trim().toUpperCase() !== String(supplierCRN).trim().toUpperCase()) {
+                throw new Error(
+                    `CANCEL BLOCKED: only the supplier that registered invoice ${invoiceId} may cancel it.`);
+            }
+            if (inv.status === 'FINANCED') {
+                throw new Error(
+                    `CANCEL BLOCKED: invoice already financed — invoice ${invoiceId} was financed at ` +
+                    `${inv.financedAt} and can never be cancelled or re-registered.`);
+            }
+            if (inv.status === 'SETTLED') {
+                throw new Error(`CANCEL BLOCKED: invoice ${invoiceId} is SETTLED and can no longer be cancelled.`);
+            }
+            if (inv.status === 'CANCELLED') {
+                throw new Error(`CANCEL BLOCKED: invoice ${invoiceId} is already CANCELLED.`);
+            }
+            if (!['REGISTERED', 'APPROVED', 'DISPUTED'].includes(inv.status)) {
+                throw new Error(`CANCEL BLOCKED: invoice ${invoiceId} is ${inv.status} and cannot be cancelled.`);
+            }
+            inv.status = 'CANCELLED';
+            inv.cancelledAt = txTime;
+            inv.cancelReason = reason;
+            // ==== end shared rule block ====
+
+            // Release the uniqueness index ONLY — this is the whole mechanism.
+            nums.delete(numberKey(inv.invoiceNumber, inv.supplierCRN));
+
         } else if (fn === 'DeclineInvoice') {
             // A decline does NOT change status. The invoice remains APPROVED and any
             // other lender can still fund it — one institution declining is its own

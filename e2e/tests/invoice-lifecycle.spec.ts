@@ -49,8 +49,18 @@ const STUB_EXTRACT = {
   goodsDescription: '200 bales cotton yarn, 40s count', poNumber: 'PO-BR-2026-3391',
   simulated: true, note: 'stubbed in e2e',
 };
-async function stubGemini(page: Page) {
-  await page.route('**/ai/extract', route => route.fulfill({ json: STUB_EXTRACT }));
+// The invoice-number field is SYSTEM-FILLED and read-only in the portal: its value
+// can only come from extraction. So the stub is what decides the number, and tests
+// set it per run to stay repeatable against a ledger that never forgets a number.
+let stubNumber = STUB_EXTRACT.invoiceNumber;
+// The register form's fields are READ-ONLY (OCR-filled), so the stub — not typing —
+// is what decides invoice number, amount and due date. Tests set these before uploading.
+let stubAmount = STUB_EXTRACT.amount;
+let stubDueDate = STUB_EXTRACT.dueDate;
+async function stubGemini(page: Page, invoiceNumber?: string) {
+  if (invoiceNumber) stubNumber = invoiceNumber;
+  await page.route('**/ai/extract', route =>
+    route.fulfill({ json: { ...STUB_EXTRACT, invoiceNumber: stubNumber, amount: stubAmount, dueDate: stubDueDate } }));
 }
 
 // ---------------------------------------------------------------------------
@@ -101,13 +111,14 @@ async function fillSmart(loc: Locator, value: string) {
 }
 
 // Uploading the invoice copy kicks off /ai/extract (stubbed) which pre-fills the
-// form ASYNCHRONOUSLY. Wait for that to land before typing: a fill() that races
-// the autofill clears the box, React re-populates it mid-fill, and the typed text
-// lands APPENDED to the extracted value (a corrupted invoice number).
-async function uploadInvoiceCopy(page: Page, pdf: string) {
+// form ASYNCHRONOUSLY. Wait for that to land before typing the other fields: a
+// fill() that races the autofill clears the box, React re-populates it mid-fill,
+// and the typed text lands APPENDED to the extracted value.
+// The invoice number is asserted, never typed — it is read-only by design.
+async function uploadInvoiceCopy(page: Page, pdf: string, expectNumber = stubNumber) {
   await page.locator('input[type="file"]').first().setInputFiles(pdf);
   await expect(field(page, /invoice ?number/i, 'invoiceNumber'),
-    'autofill settled before manual entry').toHaveValue(STUB_EXTRACT.invoiceNumber, { timeout: 20_000 });
+    'invoice number is system-filled from the invoice copy').toHaveValue(expectNumber, { timeout: 20_000 });
 }
 
 // Fill the supplier register form manually (OCR-independent). requestedAmount is
@@ -118,14 +129,18 @@ async function fillRegisterForm(page: Page, o: {
   invoiceNumber: string; amount: string; requestedAmount: string; dueDate: string;
   invoiceDate?: string; pdf?: string;
 }) {
-  if (o.pdf) await uploadInvoiceCopy(page, o.pdf);
-  await field(page, /invoice ?number/i, 'invoiceNumber').fill(o.invoiceNumber);
-  await fillSmart(field(page, /payer/i, 'payerName'), 'Northfield Retail Group plc');
-  await field(page, /amount/i, 'amount').fill(o.amount);
+  // Read-only fields (number, payer, amount, currency, dates) can only be OCR-filled,
+  // so configure the stub to report exactly these values, then upload. Only
+  // "Financing requested" is user input, so it is the one field we type.
+  stubNumber = o.invoiceNumber;
+  stubAmount = Number(o.amount);
+  stubDueDate = o.dueDate;
+  if (o.pdf) await uploadInvoiceCopy(page, o.pdf, o.invoiceNumber);
+  await expect(field(page, /invoice ?number/i, 'invoiceNumber'),
+    'invoice number is system-filled, never keyed').toHaveValue(o.invoiceNumber, { timeout: 20_000 });
+  await expect(field(page, /face value|amount/i, 'amount'),
+    'invoice amount is OCR-filled, never keyed').toHaveValue(String(o.amount), { timeout: 20_000 });
   await field(page, /financing requested/i, 'requestedAmount').fill(o.requestedAmount);
-  await fillSmart(field(page, /currency/i, 'currency'), 'GBP');
-  if (o.invoiceDate) await fillSmart(field(page, /invoice date/i, 'invoiceDate'), o.invoiceDate);
-  await fillSmart(field(page, /due ?date/i, 'dueDate'), o.dueDate);
 }
 
 // CR02: a lender's GET /invoices is now filtered to invoices applied to them, so the
@@ -167,7 +182,9 @@ async function applyToBothLenders(requestFetch: typeof fetch, invoiceId: string)
 // ---------------------------------------------------------------------------
 
 test('full invoice lifecycle: register → approve → fund → payment-instructions → DUPLICATE BLOCKED → audit trail → fake resubmission blocked', async ({ page, browser }, testInfo) => {
-  await stubGemini(page);
+  // Per-run number, delivered through the stub: the field cannot be typed into, and
+  // the ledger never forgets a number, so this is what keeps the suite repeatable.
+  await stubGemini(page, INV_NO);
 
   await test.step('1. SUPPLIER: upload invoice copy + fill the register form', async () => {
     await loginAs(page, 'supplier1');
@@ -202,7 +219,16 @@ test('full invoice lifecycle: register → approve → fund → payment-instruct
     await loginAs(page, 'payer1');
     const row = page.locator('tr').filter({ hasText: INV_NO }).first();
     await expect(row).toBeVisible({ timeout: 15_000 });
-    await row.getByRole('button', { name: /approve/i }).click();
+    // The payer must attach their proof of receipt before Approve unlocks — the
+    // goods-received note is evidence from the party that took delivery, and it is
+    // stored off-chain only (never anchored), so it changes no ledger rule.
+    // Exact name: the file input is exposed as a button too, and its accessible
+    // name (from the wrapping label) also contains the word "approve".
+    const approve = row.getByRole('button', { name: /^approve$/i });
+    await expect(approve, 'Approve is gated on the goods-received note').toBeDisabled();
+    await row.locator('input[type="file"]').setInputFiles(PDF);
+    await expect(approve).toBeEnabled();
+    await approve.click();
     await expect
       .poll(async () => (await apiState(fetch, INV_NO))[0]?.status, { timeout: 30_000, message: 'ledger -> APPROVED' })
       .toBe('APPROVED');

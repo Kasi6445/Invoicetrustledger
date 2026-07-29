@@ -32,6 +32,8 @@ passes all 26 checks is a valid implementation.
 | R10 | **Lender anonymity (API layer, not ledger):** one lender never sees another lender's name. For a lender viewer, `financedBy` of a competitor and every foreign `declines` entry become `another financial institution` (decline reasons removed), including inside audit-trail history and error messages. Supplier and payer always see real lender names. The on-chain record stays complete — the chaincode never masks. |
 | R11 | **Similar-invoice detection (API layer, read-time — flag, NEVER block):** R1 closed number reuse; the workaround is re-registering the same invoice under a NEW number, so reads compute a similarity pass across the full ledger. **Strong tier:** identical `docHash` on two+ invoices (excluding `no-document`/absent) → −25 risk points (floor 0) and a `⚠ Same document already registered as …` reason. **Soft tier:** same normalized supplier+payer+amount under different numbers → informational `ℹ Similar invoice(s) on ledger …` reason, zero score change — because different numbers with the same amount is legitimate everyday recurring billing. Flags live inside `risk.similar` (hidden from the payer with the rest of `risk`); matching spans all statuses and never blocks registration — detection in the system, decision with the institution. |
 
+| R12 | **Supplier cancellation — withdrawable, never erasable:** a supplier may cancel their OWN invoice while its status is `REGISTERED`, `APPROVED` or `DISPUTED`. The `INV_` record is NOT deleted — it is set to `CANCELLED` with `cancelledAt` + `cancelReason` and keeps its full history. The ONLY thing released is the `NUM_` uniqueness index (R1), which is what frees the invoice number for a corrected re-registration. Refusals all start `CANCEL BLOCKED`: a non-owning supplier, a `FINANCED` invoice (`CANCEL BLOCKED: invoice already financed …`), a `SETTLED` invoice, or one already `CANCELLED`. **This never touches the financing lock** — R5 reads `INV_.status`, never `NUM_`, so no cancellation can reopen a financed invoice. A `CANCELLED` invoice can never be approved, funded or settled (each transition guards on its own required status). |
+
 ### App-layer rules (CR02 — NOT ledger invariants)
 
 These live in `api/server.js` + the off-chain store. A backend does not implement
@@ -51,12 +53,18 @@ REGISTERED ──approve──▶ APPROVED ──fund──▶ FINANCED ──se
      │                     │
      │                     └─decline─▶ (stays APPROVED; appended to declines[])
      └───dispute──▶ DISPUTED (terminal)
+
+REGISTERED / APPROVED / DISPUTED ──cancel(supplier, owner-only)──▶ CANCELLED (terminal)
+     FINANCED / SETTLED ──cancel──▶ refused (CANCEL BLOCKED)
 ```
+
+`CANCELLED` is terminal and releases the `NUM_` index only; the record itself
+remains on the ledger with its history intact (R12).
 
 ## Interface every backend implements (the swap seam)
 
 ```
-submit(fn, ...args)    // writes:  RegisterInvoice, ApproveInvoice, DisputeInvoice, DeclineInvoice, FundInvoice, SettleInvoice
+submit(fn, ...args)    // writes:  RegisterInvoice, ApproveInvoice, DisputeInvoice, CancelInvoice, DeclineInvoice, FundInvoice, SettleInvoice
 evaluate(fn, ...args)  // reads:   ReadInvoice, GetAllInvoices, GetInvoiceHistory
 verifyChain()          // tamper-evidence proof (backend-appropriate)
 ```
@@ -64,6 +72,7 @@ verifyChain()          // tamper-evidence proof (backend-appropriate)
 Argument order:
 - `RegisterInvoice(invoiceId, invoiceNumber, supplierName, supplierCRN, payerName, amount, requestedAmount, currency, invoiceDate, dueDate, docHashes)` — CR01 signature (11 positional args; `docHashes` is a JSON string, `{}` for none)
 - `ApproveInvoice(invoiceId, approverName)` · `DisputeInvoice(invoiceId, approverName, reason)`
+- `CancelInvoice(invoiceId, supplierCRN, reason)` — `supplierCRN` is the caller's own CRN; the ledger re-checks ownership against the record
 - `DeclineInvoice(invoiceId, lenderName, reason)`
 - `FundInvoice(invoiceId, lenderName)` · `SettleInvoice(invoiceId)`
 - `ReadInvoice(invoiceId)` · `GetAllInvoices()` · `GetInvoiceHistory(invoiceId)`

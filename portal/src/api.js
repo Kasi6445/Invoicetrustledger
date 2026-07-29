@@ -59,8 +59,18 @@ export function logout() { clearSession(); }
 export const listInvoices   = () => client.get('/invoices').then(r => r.data);
 export const getInvoice     = id => client.get(`/invoices/${id}`).then(r => r.data);
 export const getHistory     = id => client.get(`/invoices/${id}/history`).then(r => r.data);
-export const approveInvoice = id => client.post(`/invoices/${id}/approve`, {}).then(r => r.data);
+// The payer attaches their proof of receipt with the approval. It is stored off-chain
+// (never anchored on the ledger); a bodyless approve is still accepted by the API.
+export function approveInvoice(id, goodsReceivedNote) {
+  if (!goodsReceivedNote) return client.post(`/invoices/${id}/approve`, {}).then(r => r.data);
+  const fd = new FormData();
+  fd.append('goodsReceivedNote', goodsReceivedNote);
+  return client.post(`/invoices/${id}/approve`, fd).then(r => r.data);
+}
 export const disputeInvoice = (id, reason) => client.post(`/invoices/${id}/dispute`, { reason }).then(r => r.data);
+// Supplier withdraws their own pre-financing invoice. The record stays on the ledger
+// as CANCELLED; only the invoice-number index is released, freeing it for re-use.
+export const cancelInvoice  = (id, reason) => client.post(`/invoices/${id}/cancel`, { reason }).then(r => r.data);
 export const fundInvoice    = id => client.post(`/invoices/${id}/fund`, {}).then(r => r.data);
 // App-layer only: offer this invoice to a named lender. Returns the updated list.
 export const applyToLender  = (id, lender) => client.post(`/invoices/${id}/apply`, { lender }).then(r => r.data);

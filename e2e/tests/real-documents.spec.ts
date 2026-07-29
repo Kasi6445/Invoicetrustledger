@@ -94,22 +94,27 @@ async function fillSmart(loc: Locator, value: string) {
   else await loc.fill(value);
 }
 
-// Upload the invoice copy (drives docHash) then fill the form manually. The
-// stubbed /ai/extract may pre-fill fields; we overwrite them deterministically.
+// The portal's number/amount/date fields are READ-ONLY (OCR-filled), so the stub —
+// not typing — decides them. Set these before the upload fires.
+let stubNumber = STUB_EXTRACT.invoiceNumber;
+let stubAmount = STUB_EXTRACT.amount;
+let stubDueDate = STUB_EXTRACT.dueDate;
+
+// Upload the invoice copy (drives docHash); the stubbed /ai/extract fills the
+// read-only fields with the values configured above. Only "Financing requested"
+// is user input, so it is the sole field we type.
 async function uploadThenFill(page: Page, pdf: string, o: {
   invoiceNumber: string; amount: string; requestedAmount: string; dueDate: string;
 }) {
+  stubNumber = o.invoiceNumber;
+  stubAmount = Number(o.amount);
+  stubDueDate = o.dueDate;
   await page.locator('input[type="file"]').first().setInputFiles(pdf);
-  // Wait for the (stubbed) extraction to populate the form before overwriting it —
-  // a fill() racing that re-render ends up APPENDED to the extracted value.
   await expect(field(page, /invoice ?number/i, 'invoiceNumber'),
-    'autofill settled before manual entry').toHaveValue(STUB_EXTRACT.invoiceNumber, { timeout: 20_000 });
-  await field(page, /invoice ?number/i, 'invoiceNumber').fill(o.invoiceNumber);
-  await fillSmart(field(page, /payer/i, 'payerName'), 'Northfield Retail Group plc');
-  await field(page, /amount/i, 'amount').fill(o.amount);
+    'invoice number is system-filled from the invoice copy').toHaveValue(o.invoiceNumber, { timeout: 20_000 });
+  await expect(field(page, /face value|amount/i, 'amount'),
+    'invoice amount is OCR-filled from the invoice copy').toHaveValue(String(o.amount), { timeout: 20_000 });
   await field(page, /financing requested/i, 'requestedAmount').fill(o.requestedAmount);
-  await fillSmart(field(page, /currency/i, 'currency'), 'GBP');
-  await fillSmart(field(page, /due ?date/i, 'dueDate'), o.dueDate);
 }
 
 function armDialogCapture(page: Page): { last: () => string } {
@@ -169,7 +174,8 @@ test.describe.configure({ mode: 'serial' });
 test.describe('Real-document scenarios (fixture PDFs, as-is)', () => {
   // Stub Gemini for every test — zero live /ai/extract calls.
   test.beforeEach(async ({ page }) => {
-    await page.route('**/ai/extract', route => route.fulfill({ json: STUB_EXTRACT }));
+    await page.route('**/ai/extract', route =>
+      route.fulfill({ json: { ...STUB_EXTRACT, invoiceNumber: stubNumber, amount: stubAmount, dueDate: stubDueDate } }));
   });
 
   test('R1 — second layout registers + on-chain hash === file sha256', async ({ page }) => {
@@ -283,6 +289,8 @@ test.describe('Real-document scenarios (fixture PDFs, as-is)', () => {
   // form from the (stubbed) extraction — proving the upload -> extract ->
   // form-populate wiring without spending live quota.
   test('OCR — uploading the invoice copy autofills the form (stubbed extraction)', async ({ page }) => {
+    // Serial suite: pin what the stub reports, since earlier tests set their own.
+    stubNumber = 'INV-2026-007';
     await loginAs(page, 'supplier1');
     await page.locator('input[type="file"]').first().setInputFiles(PDF_007);
     await expect(field(page, /invoice ?number/i, 'invoiceNumber'), 'invoice number autofilled').toHaveValue(/INV-2026-007/);
